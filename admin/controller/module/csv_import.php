@@ -18,6 +18,10 @@ class ControllerModuleCsvImport extends Controller {
 	/** @const */
 	private static $unique = array('product_id', 'model', 'sku', 'upc', 'ean',	'jan', 'isbn', 'mpn', 'keyword');	//!< unique fields
 	private static $log_file = 'csv_import.log';
+	
+	protected $products_changed = null;
+	protected $products_warnings = null;
+	protected $products_excluded = null;
 
 	/*
 	 * Entry point of module
@@ -139,6 +143,7 @@ class ControllerModuleCsvImport extends Controller {
 				'button_import',
 				'button_add_field',
 				
+				'tab_general',
 				'tab_products',
 				'tab_categories',
 
@@ -152,6 +157,11 @@ class ControllerModuleCsvImport extends Controller {
 				'entry_category_key',
 				'entry_if_exists',
 				'entry_if_not_exists',
+				'entry_create_category',
+				
+				'entry_skip_first',
+				'entry_csv_delimiter',
+				'entry_csv_enclosure',
 
 				'warring_category_not_found',
 
@@ -169,6 +179,11 @@ class ControllerModuleCsvImport extends Controller {
 				'csv_import_fields',
 				'csv_import_clear_p2c',
 				'csv_import_add_to_parent',
+				'import_skip_first',
+				'import_delimiter',
+				'import_enclosure',
+				'csv_import_create_category',
+				
 		);
 
 		foreach ($config_data as $conf) {
@@ -677,6 +692,39 @@ class ControllerModuleCsvImport extends Controller {
 		}
 	}
 
+	protected function addManufacturer(&$product, &$manufacturers)
+	{
+		
+		if (!is_int($product['manufacturer_id'])) {
+			$manufacturer_id = array_search($product['manufacturer_id'], $manufacturers);
+			
+			if ($manufacturer_id !== false) {
+				$product['manufacturer_id'] = $manufacturer_id;
+			} else {
+				$this->model_catalog_manufacturer->addManufacturer(array(
+					'name' => $product['manufacturer_id'],
+					'sort_order' => 0
+				));
+				$manufacturer_id = $this->db->getLastId();	
+				$manufacturers[$manufacturer_id] = $product['manufacturer_id'];
+				$product['manufacturer_id'] = $manufacturer_id;
+				
+			}
+		} else {
+			if (!isset($manufacturers[$product['manufacturer_id']])) {
+				$product['manufacturer_id'] = '';
+				$this->products_warnings[] = array (
+					'key' => isset($product[$import_key]) ?  $product[$import_key] : $product['product_description'][$language][$import_key] ,
+					'name' => isset($product['product_description'][$language]['name']) ? $product['product_description'][$language]['name'] : '',
+					'error' => 'Manufacturer id not found!',
+					'status' => $text_warring
+				);
+			}
+		}
+		
+		return $product['manufacturer_id'];	
+	}
+	
 	/*
 	 * This function make import from file to store
 	 * @param cron - true/false indicate that module run on cron
@@ -708,9 +756,14 @@ class ControllerModuleCsvImport extends Controller {
 		$text_warring = $this->language->get('text_warring');
 		$warring_category_not_found = $this->language->get('warring_category_not_found');
 
-		$products_changed = array();
+		$this->products_changed = array();
 		$products_missing = array();
-		$products_excluded = array();
+		$this->products_excluded = array();
+		
+		// flags
+		$import_options = in_array('option', $import_fields);
+		$import_categories = in_array('category_id', $import_fields);
+		$import_manufacturers = in_array('manufacturer_id', $import_fields);
 
 		// TODO move to validate
 		if (!is_file(DIR_DOWNLOAD.'import/'.$file) || !is_readable(DIR_DOWNLOAD.'import/'.$file)) {
@@ -733,60 +786,73 @@ class ControllerModuleCsvImport extends Controller {
 			return false;
 		}
 
-		set_time_limit(0);
+		set_time_limit(0); 
 
 		$this->load->model('module/csv_import');
 		$csv_options = array(
-			'delimiter' => "|",
+			'delimiter' => html_entity_decode($this->config->get('import_delimiter')),
+			'enclosure' => html_entity_decode($this->config->get('import_enclosure')),
 			'fields' 	=> $import_fields,
 		);
 
 		$this->load->model('catalog/product');
 		$this->load->model('catalog/category');
+		
+		if ($import_manufacturers) {
+			$this->load->model('catalog/manufacturer');
+			$manufacturer = $this->model_catalog_manufacturer->getManufacturers();
+			
+			$manufacturers = array();
+			foreach($manufacturer as $item) {
+				$manufacturers[$item['manufacturer_id']] = $item['name'];
+			}
+			unset($manufacturer);
+		}
+		
+		if ($import_options) {
+			// Get all options
+			$this->load->model('catalog/option');
+			$options = $this->model_catalog_option->getOptions(array());
 
-		$this->load->model('catalog/option');
-
-		// Get all options
-		$options = $this->model_catalog_option->getOptions(array());
-
-		foreach ($options as &$option) {
-			$option_values = $this->model_catalog_option->getOptionValues($option['option_id']);
-			$option['option_value'] = array();
-			$next_value_id = 0;
-			foreach ($option_values as $op) {
-				if ($next_value_id < (int)$op['option_value_id']) {
-					$next_value_id = (int)$op['option_value_id'];
-				}
-				$option['option_value'][] = array(
-					'option_value_id' => $op['option_value_id'],
-					'image' => $op['image'],
-					'sort_order' => $op['sort_order'],
-					'option_value_description' => array(
-						$language => array (
-							'name' => $op['name']
+			foreach ($options as &$option) {
+				$option_values = $this->model_catalog_option->getOptionValues($option['option_id']);
+				$option['option_value'] = array();
+				$next_value_id = 0;
+				foreach ($option_values as $op) {
+					if ($next_value_id < (int)$op['option_value_id']) {
+						$next_value_id = (int)$op['option_value_id'];
+					}
+					$option['option_value'][] = array(
+						'option_value_id' => $op['option_value_id'],
+						'image' => $op['image'],
+						'sort_order' => $op['sort_order'],
+						'option_value_description' => array(
+							$language => array (
+								'name' => $op['name']
+							)
 						)
+					);
+				}
+				$option['next_value_id'] = ++$next_value_id;
+				$option['option_description'] = array(
+					$option['language_id'] => array(
+						'name' => $option['name']
 					)
 				);
+				unset($option['name']);
 			}
-			$option['next_value_id'] = ++$next_value_id;
-			$option['option_description'] = array(
-				$option['language_id'] => array(
-					'name' => $option['name']
-				)
-			);
-			unset($option['name']);
+			unset($option);
 		}
-		unset($option);
 		
 		// Prepare products
-		if ($clear_p2c && in_array('category_id', $import_fields)) {
+		if ($clear_p2c && $import_categories) {
 			$this->model_module_csv_import->unlinkP2C();
 		}
 
 		$this->cache->delete('product');
 		while (($product = $this->model_module_csv_import->getProduct($handle, $csv_options)) !== FALSE) {
 			if (!$product) continue;
-			$product_data = array();
+			$product_data = array(); 
 
 			// Link product to category
 			if (isset($product['category_id']) && !empty($product['category_id'])) {
@@ -816,7 +882,7 @@ class ControllerModuleCsvImport extends Controller {
 				}
 
 				if ($category === false) {
-					$products_warnings[] = array (
+					$this->products_warnings[] = array (
 							'key' => isset($product[$import_key]) ?  $product[$import_key] : $product['product_description'][$language][$import_key] ,
 							'name' => isset($product['product_description'][$language]['name']) ? $product['product_description'][$language]['name'] : '',
 							'error' => $category_path. ' - '. $warring_category_not_found,
@@ -872,7 +938,17 @@ class ControllerModuleCsvImport extends Controller {
 							$product['product_category'][] = $category;
 						}
 					}
-					$product['status'] = "1";
+					
+					// Status
+					if (!isset($product['status'])) {
+						$product['status'] = '1';
+					}
+					
+					// Manufacturer
+					if (isset($product['manufacturer_id'])) {
+						$this->addManufacturer($product, $manufacturers);
+					}
+					
 					$this->model_catalog_product->addProduct($product);
 					// TODO REDO get new product_id
 					$result = $this->model_module_csv_import->getProducts($product_data);
@@ -886,7 +962,7 @@ class ControllerModuleCsvImport extends Controller {
 						}
 					}
 
-					$products_changed[$product_info['product_id']] = array(
+					$this->products_changed[$product_info['product_id']] = array(
 							'key' => isset($product[$import_key]) ?  $product[$import_key] : $product['product_description'][$language][$import_key],
 							'status' => $text_add,
 							'name' => isset($product['product_description'][$language]['name']) ? $product['product_description'][$language]['name'] : ''
@@ -946,23 +1022,31 @@ class ControllerModuleCsvImport extends Controller {
 								}
 							}							
 						}
-
-						// TODO some array fields rewrites					
-																		
-					$product['status'] = "1"; // D	
-					$product['product_image'] = $this->model_catalog_product->getProductImages($product_info['product_id']); // D
-					$product['product_special'] = $this->model_catalog_product->getProductSpecials($product_info['product_id']); // D
+						
+						// Manufacturer						
+						if (isset($product['manufacturer_id'])) {
+							$this->addManufacturer($product, $manufacturers);
+						}
+								
+						// Status
+						if (!isset($product['status'])) {
+							$product['status'] = '1';
+						}
+						
+						// TODO some array fields rewrites
+						$product['product_image'] = $this->model_catalog_product->getProductImages($product_info['product_id']); // D
+						$product['product_special'] = $this->model_catalog_product->getProductSpecials($product_info['product_id']); // D
 						
 						
 						$this->model_catalog_product->editProduct($product_info['product_id'], $product);
-						$products_changed[$product_info['product_id']] = array(
+						$this->products_changed[$product_info['product_id']] = array(
 								'key' => isset($product[$import_key]) ?  $product[$import_key] : $product['product_description'][$language][$import_key] ,
 								'status' => $text_update,
 								'name' => isset($product['product_description'][$language]['name']) ? $product['product_description'][$language]['name'] : ''
 							);
 						break;
 					case 1:
-						$products_excluded[$product_info['product_id']] = array(
+						$this->products_excluded[$product_info['product_id']] = array(
 							'key' => isset($product_info[$import_key]) ?  $product_info[$import_key] : $product_info['product_description'][$language][$import_key] ,
 							'status' => $text_exclude,
 							'name' => isset($product_info['product_description'][$language]['name']) ? $product_info['product_description'][$language]['name'] : ''
@@ -980,25 +1064,27 @@ class ControllerModuleCsvImport extends Controller {
 			$this->log->write('Import warring: Can\'t unlock file '.DIR_DOWNLOAD.'import/'.$file );
 		}
 		fclose($handle);
-
-		// Add options
-		foreach ($options as &$option) {
-			// TODO check if option not exists and ADD
-			$option_id = $option['option_id'];
-			unset($option['option_id']);
-			$this->model_catalog_option->editOption($option_id, $option);
+				
+		if ($import_options) {
+			// Add options
+			foreach ($options as &$option) {
+				// TODO check if option not exists and ADD
+				$option_id = $option['option_id'];
+				unset($option['option_id']);
+				$this->model_catalog_option->editOption($option_id, $option);
+			}
+			unset($option);
+			unset($options);
 		}
-		unset($option);
-		unset($options);
 
 		switch ($this->config->get('if_not_exists')) {
 		case 0:
-			$products_ids = array_keys($products_changed);
+			$products_ids = array_keys($this->products_changed);
 			$not_in_import = $this->model_module_csv_import->getStoreProductDiff($products_ids);
 			$this->model_module_csv_import->disableProducts($not_in_import );
 			break;
 		case 1:
-			$products_ids = array_keys($products_changed);
+			$products_ids = array_keys($this->products_changed);
 			$not_in_import = $this->model_module_csv_import->getStoreProductDiff($products_ids);
 
 			foreach ($not_in_import as $product_id) {
@@ -1012,16 +1098,16 @@ class ControllerModuleCsvImport extends Controller {
 		foreach ($not_in_import as $product_id) {
 			$product_info = $this->model_catalog_product->getProduct($product_id);
 
-			$products_excluded[$product_info['product_id']] = array(
+			$this->products_excluded[$product_info['product_id']] = array(
 							'key' => isset($product_info[$import_key]) ?  $product_info[$import_key] : $product_info[$import_key] ,
 							'name' => isset($product_info['name']) ? $product_info['name'] : ''
 						);
 			switch ($this->config->get('if_not_exists')) {
 			case 0:
-				$products_excluded[$product_info['product_id']]['status'] = $text_hide;
+				$this->products_excluded[$product_info['product_id']]['status'] = $text_hide;
 				break;
 			case 1:
-				$products_excluded[$product_info['product_id']]['status'] = $text_delete; // TODO not work!
+				$this->products_excluded[$product_info['product_id']]['status'] = $text_delete; // TODO not work!
 				break;
 			default:
 				break;
@@ -1042,9 +1128,9 @@ class ControllerModuleCsvImport extends Controller {
 
 			$temp_dir = sys_get_temp_dir();
 			$results = array (
-				'success' => $products_changed,
-				'warrings' => $products_warnings,
-				'exclude' => $products_excluded
+				'success' => $this->products_changed,
+				'warrings' => $this->products_warnings,
+				'exclude' => $this->products_excluded
 			);
 
 			$mail = new Mail();
@@ -1064,7 +1150,7 @@ class ControllerModuleCsvImport extends Controller {
 				$mail->addAttachment($filename);
 			}
 
-			$total = count($products_changed) + count($products_excluded);
+			$total = count($this->products_changed) + count($this->products_excluded);
 
 			$mail->protocol = $this->config->get('config_mail_protocol');
 			$mail->parameter = $this->config->get('config_mail_parameter');
@@ -1077,7 +1163,7 @@ class ControllerModuleCsvImport extends Controller {
 	  		$mail->setFrom($this->config->get('config_email'));
 	  		$mail->setSender($this->language->get('email_sender'));
 	  		$mail->setSubject(html_entity_decode($this->language->get('email_subject'), ENT_QUOTES, 'UTF-8'));
-	  		$mail->setHtml(html_entity_decode(sprintf($this->language->get('email_text'), $total, count($products_changed), count($products_excluded), count($products_warnings)), ENT_QUOTES, 'UTF-8'));
+	  		$mail->setHtml(html_entity_decode(sprintf($this->language->get('email_text'), $total, count($this->products_changed), count($this->products_excluded), count($this->products_warnings)), ENT_QUOTES, 'UTF-8'));
       		$mail->send();
 
 			$this->log->write('Import result sending to: '.$import_email);
@@ -1085,16 +1171,16 @@ class ControllerModuleCsvImport extends Controller {
 		
 		if (!$cron) {
 			echo json_encode(array (
-				'success' => $products_changed,
-				'warnings' => $products_warnings,
-				'exclude' => $products_excluded,
+				'success' => $this->products_changed,
+				'warnings' => $this->products_warnings,
+				'exclude' => $this->products_excluded,
 				'time' =>  $execution_time,
 				'memory_total' => $total_memory_usage,
 				'memory_peak' => $get_memory_peak_usage,
 			));
 		}
 
-		$this->log->write('Import complete: '."\n\t\t".'-> success: '.count($products_changed)."\n\t\t".'-> exclude: '.count($products_excluded));
+		$this->log->write('Import complete: '."\n\t\t".'-> success: '.count($this->products_changed)."\n\t\t".'-> exclude: '.count($this->products_excluded));
 
 		return true;
 	}
