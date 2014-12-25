@@ -362,7 +362,8 @@ class ControllerModuleCsvImport extends Controller {
 				$allowed = array(
 					'csv',
 					'xls',
-					'xlsx'
+					'xlsx',
+					'zip',
 				);
 
 				if (!in_array(substr(strrchr($filename, '.'), 1), $allowed)) {
@@ -374,7 +375,11 @@ class ControllerModuleCsvImport extends Controller {
 					'text/csv',
 					'application/vnd.ms-excel',
 					'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-					'application/octet-stream'
+					'application/octet-stream',
+					'application/x-zip',
+					'application/x-zip-compressed',
+					'application/x-gzip',
+					'application/x-gzip-compressed',
 				);
 
 				if (!in_array($this->request->files['file']['type'], $allowed)) {
@@ -400,6 +405,7 @@ class ControllerModuleCsvImport extends Controller {
 				$json['mask'] = $filename;
 
 				move_uploaded_file($this->request->files['file']['tmp_name'], DIR_DOWNLOAD .'import/'. $filename);
+				chmod(DIR_DOWNLOAD .'import/'. $filename, 0777);
 			}
 
 			$json['success'] = $this->language->get('text_upload');
@@ -733,10 +739,11 @@ class ControllerModuleCsvImport extends Controller {
 
 		$start_memory_usage = memory_get_usage();
 		$start_time = microtime(true);
-
 	
 		// Load config
 		$file = ($cron) ? self::CRON_IMPORT_FILENAME : $this->config->get('csv_import_file');
+		$isZip = (strtolower(pathinfo($file, PATHINFO_EXTENSION)) == 'zip');
+		$fileName = pathinfo($file, PATHINFO_FILENAME);
 		$language = $this->config->get('config_language_id');
 		$import_key = $this->config->get('import_key');
 		$category_key = $this->config->get('category_key');
@@ -764,7 +771,52 @@ class ControllerModuleCsvImport extends Controller {
 		$import_options = in_array('option', $import_fields);
 		$import_categories = in_array('category_id', $import_fields);
 		$import_manufacturers = in_array('manufacturer_id', $import_fields);
+		
+		// check Zip file
+		if ($isZip) {
+			if (!is_file(DIR_DOWNLOAD.'import/'. $file) || !is_readable(DIR_DOWNLOAD.'import/'. $file)) {
+				$this->error['warning'] = "no access";
+				$this->log->write('Import failed: Can\'t read file '.DIR_DOWNLOAD.'import/'. $file );
 
+				return false;
+			}
+			// unzip file entry
+			$zip = new ZipArchive;
+			$res = $zip->open(DIR_DOWNLOAD.'import/'. $file);
+			if ($res !== true) {
+				$this->error['warning'] = "cant open zip";
+				$this->log->write('Import failed: Can\'t open file (ERROR: ' . $res . ') '.DIR_DOWNLOAD.'import/'. $file );
+				
+				return false;
+			}
+			if ($zip->numFiles != 1) {
+				echo $this->error['warning'] = "too few files in archive";
+				$this->log->write('Import failed: too few files in archive '.DIR_DOWNLOAD.'import/'. $file );
+				
+				return false;
+			}
+			
+			$zipFile = $file;
+			
+			// get single file
+			$file = $zip->getNameIndex(0);
+			if ($file == false) {
+				$this->error['warning'] = 'zip no files with index 0';
+				$this->log->write('Import failed: no files with index 0 in '.DIR_DOWNLOAD.'import/'. $zipFile );
+				
+				return false;
+			}
+			
+			if (!$zip->extractTo(DIR_DOWNLOAD.'import/', array($file))) {
+				$this->error['warning'] = "cant extract from zip";
+				$this->log->write('Import failed: Can\'t extract file '.DIR_DOWNLOAD.'import/'. $file );
+				
+				return false;
+			}
+			chmod(DIR_DOWNLOAD.'import/'. $file, 0777);
+			$zip->close();		
+		}
+		
 		// TODO move to validate
 		if (!is_file(DIR_DOWNLOAD.'import/'.$file) || !is_readable(DIR_DOWNLOAD.'import/'.$file)) {
 			$this->error['warning'] = "no access";
@@ -1064,6 +1116,9 @@ class ControllerModuleCsvImport extends Controller {
 			$this->log->write('Import warring: Can\'t unlock file '.DIR_DOWNLOAD.'import/'.$file );
 		}
 		fclose($handle);
+		if ($isZip) {
+			unlink(DIR_DOWNLOAD.'import/'. $file);
+		}
 				
 		if ($import_options) {
 			// Add options
