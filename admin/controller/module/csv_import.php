@@ -18,10 +18,6 @@ class ControllerModuleCsvImport extends Controller {
 	/** @const */
 	private static $unique = array('product_id', 'model', 'sku', 'upc', 'ean',	'jan', 'isbn', 'mpn', 'keyword');	//!< unique fields
 	private static $log_file = 'csv_import.log';
-	
-	protected $products_changed = null;
-	protected $products_warnings = null;
-	protected $products_excluded = null;
 
 	/*
 	 * Entry point of module
@@ -296,7 +292,7 @@ class ControllerModuleCsvImport extends Controller {
 
 		$this->load->model('module/csv_import');
 
-		$import_keys = array();
+		$importKeys = array();
 		$product_fields = $this->model_module_csv_import->getProductFieds();
 
 		$product_fields['category_id'] = 'category_id';
@@ -306,12 +302,12 @@ class ControllerModuleCsvImport extends Controller {
 			$product_fields[$key] = ($pos = utf8_strpos($name, ':')) ? utf8_substr($name, 0, $pos) : $name;
 
 			if (in_array($key, $this->data['csv_import_fields']) && in_array($key, self::$unique)) {
-				$import_keys[$key] = ($pos = utf8_strpos($name, ':')) ? utf8_substr($name, 0, $pos) : $name;
+				$importKeys[$key] = ($pos = utf8_strpos($name, ':')) ? utf8_substr($name, 0, $pos) : $name;
 			}
 		}
 		$this->data['product_fields'] = $product_fields;
 
-		$this->data['import_keys'] = $import_keys;
+		$this->data['import_keys'] = $importKeys;
 		
 		$category_keys = array();
 		$category_fields = $this->model_module_csv_import->getCategoryFieds();
@@ -478,301 +474,17 @@ class ControllerModuleCsvImport extends Controller {
 	}
 
 	/*
-	 * This function add option
-	 * @param options - array of all store options
-	 * @param product - link to product
-	 */
-	protected function add_option(&$options, &$product) {
-		// TODO multi options type
-		$language = $this->config->get('config_language_id');
-
-		$sign = '+';
-		list($type, $name, $value, $price) = explode(':', $product['option'], 4);
-		$price = (int)$price;
-		if ($price < 0) {
-			$sign = '-';
-			$price = -$price;
-		}
-
-		$name = htmlspecialchars($name);
-		$value = htmlspecialchars($value);
-
-		$option_exists = false;
-		$option_index = 0;
-
-		// Option exists?
-		foreach ($options as $index => &$option) {
-
-			if ($option['option_description'][$language]['name'] == $name && $option['type'] == $type) {
-				$option_exists = true;
-
-				$option_value_exists = false;
-				$option_value_index = 0;
-				// Option value exists?
-				foreach ($option['option_value'] as $key => $op_value) {
-					if (isset($op_value['option_value_description'][$language]) && $op_value['option_value_description'][$language]['name'] == $value) {
-
-						$option_value_exists = true;
-						$option_value_index = $key;
-						break;
-					}
-				}
-				$option_index = $index;
-				break;
-			}
-		}
-		unset($option);
-
-		if ($option_exists == false) {
-			$new_option = array (
-				'option_description' => array (
-					$language => array(
-						'name' => $name
-					)
-				),
-				'type' => 'select',
-				'sort_order' => 0,
-				'option_value' => array	(
-					array (
-						'option_value_id' => '',
-						'option_value_description' => array	(
-							$language => array (
-								'name' => $value
-							)
-						),
-						'image' => '',
-						'sort_order' => 0
-					)
-				)
-			);
-			$this->model_catalog_option->addOption($new_option);
-			$new_op = $this->model_catalog_option->getOptions(array('filter_name' => $name));
-
-			$new_op = current($new_op);
-
-			$new_option['option_id'] = $new_op['option_id'];
-			$option_id = $new_option['option_id'];
-			unset($new_op);
-
-			$option_values = $this->model_catalog_option->getOptionValues($new_option['option_id']);
-			$new_option['option_value'] = array();
-			$next_value_id = 0;
-			foreach ($option_values as $op) {
-				if ($next_value_id < (int)$op['option_value_id']) {
-					$next_value_id = (int)$op['option_value_id'];
-				}
-				$new_option['option_value'][] = array(
-					'option_value_id' => $op['option_value_id'],
-					'image' => $op['image'],
-					'sort_order' => $op['sort_order'],
-					'option_value_description' => array(
-						$language => array (
-							'name' => $op['name']
-						)
-					)
-				);
-			}
-			$new_option['next_value_id'] = ++$next_value_id;
-			$new_option['option_description'] = array(
-				$language => array(
-					'name' => $name
-				)
-			);
-			unset($new_option['name']);
-			$options[] = $new_option;
-
-			// Add to product
-			if (isset($product['product_option'])) {
-				$product['product_option'][0] = array (
-					'product_option_id' => '',
-					'name' => $name,
-					'option_id' => $option_id,
-					'type' => $type,
-					'required' => 0,
-					'product_option_value' => array (
-						array (
-							'option_value_id' => $new_option['option_value'][0]['option_value_id'],
-							'product_option_value_id' => '',
-							'quantity' => $product['quantity'],
-							'subtract' => 0,
-							'price_prefix' => $sign,
-							'price' => $price,
-							'points_prefix' => '+',
-							'points' => 0,
-							'weight_prefix' => '+',
-							'weight' => 0
-						)
-					)
-				);
-			}
-			unset($new_option);
-
-		} else {
-			$option_value_id = $options[$option_index]['next_value_id'];
-			if ($option_value_exists == false) {
-				// Add new value to global options
-				$options[$option_index]['option_value'][] = array(
-					'option_value_id' => $options[$option_index]['next_value_id'],
-					'image' => '', // TODO redo
-					'sort_order' => 0,
-					'option_value_description' => array(
-						$language => array(
-							'name' => $value
-						)
-					)
-				);
-				$options[$option_index]['next_value_id']++;
-			} else {
-				// Upadate value in global options
-				$option_value_id = $options[$option_index]['option_value'][$option_value_index]['option_value_id'];
-			}
-
-			// Add to product
-
-			$op_exists = false;
-			foreach ($product['product_option'] as &$option) {
-				if ($option['option_id'] == $options[$option_index]['option_id']) {
-
-					$value_exists = false;
-					foreach ($option['product_option_value'] as  &$option_value) {
-						// $tmp = $this->model_catalog_option->getOptionValue($option_value['option_value_id']);
-						$val = '';
-						foreach ($options[$option_index]['option_value'] as $option_val) {
-							if ($option_value['option_value_id'] == $option_val['option_value_id']) {
-								$val = $option_val['option_value_description'][$language]['name'];
-							}
-						}
-						if ($val == $value) {
-							$value_exists = true;
-							$option_value['quantity'] = $product['quantity'];
-							$option_value['price'] = $price;
-							break;
-						}
-					}
-
-					unset($option_value);
-					if (!$value_exists) {
-						$option['product_option_value'][] = array (
-							'option_value_id' => $option_value_id,
-							'product_option_value_id' => '',
-							'quantity' => $product['quantity'],
-							'subtract' => 0,
-							'price_prefix' => $sign,
-							'price' => $price,
-							'points_prefix' => '+',
-							'points' => 0,
-							'weight_prefix' => '+',
-							'weight' => 0
-						);
-					}
-					$op_exists = true;
-					break;
-				}
-			}
-			unset($option);
-
-			if (!$op_exists) {
-				$product['product_option'][0] = array (
-					'product_option_id' => '',
-					'name' => $name,
-					'option_id' => $options[$option_index]['option_id'],
-					'type' => $type,
-					'required' => 0,
-					'product_option_value' => array (
-						array (
-							'option_value_id' => $options[$option_index]['option_value'][$option_value_index]['option_value_id'],
-							'product_option_value_id' => '',
-							'quantity' => $product['quantity'],
-							'subtract' => 0,
-							'price_prefix' => $sign,
-							'price' => $price,
-							'points_prefix' => '+',
-							'points' => 0,
-							'weight_prefix' => '+',
-							'weight' => 0
-						)
-					)
-				);
-			}
-			unset($option);
-		}
-	}
-
-	protected function addManufacturer(&$product, &$manufacturers)
-	{
-		
-		if (!is_int($product['manufacturer_id'])) {
-			$manufacturer_id = array_search($product['manufacturer_id'], $manufacturers);
-			
-			if ($manufacturer_id !== false) {
-				$product['manufacturer_id'] = $manufacturer_id;
-			} else {
-				$this->model_catalog_manufacturer->addManufacturer(array(
-					'name' => $product['manufacturer_id'],
-					'sort_order' => 0
-				));
-				$manufacturer_id = $this->db->getLastId();	
-				$manufacturers[$manufacturer_id] = $product['manufacturer_id'];
-				$product['manufacturer_id'] = $manufacturer_id;
-				
-			}
-		} else {
-			if (!isset($manufacturers[$product['manufacturer_id']])) {
-				$product['manufacturer_id'] = '';
-				$this->products_warnings[] = array (
-					'key' => isset($product[$import_key]) ?  $product[$import_key] : $product['product_description'][$language][$import_key] ,
-					'name' => isset($product['product_description'][$language]['name']) ? $product['product_description'][$language]['name'] : '',
-					'error' => 'Manufacturer id not found!',
-					'status' => $text_warring
-				);
-			}
-		}
-		
-		return $product['manufacturer_id'];	
-	}
-	
-	/*
 	 * This function make import from file to store
 	 * @param cron - true/false indicate that module run on cron
 	 */
 	protected function import($cron = false) {
 
 		$start_memory_usage = memory_get_usage();
-		$start_time = microtime(true);
-	
-		// Load config
-		$file = ($cron) ? self::CRON_IMPORT_FILENAME : $this->config->get('csv_import_file');
-		$isZip = (strtolower(pathinfo($file, PATHINFO_EXTENSION)) == 'zip');
-		$fileName = pathinfo($file, PATHINFO_FILENAME);
-		$language = $this->config->get('config_language_id');
-		$import_key = $this->config->get('import_key');
-		$category_key = $this->config->get('category_key');
-		$import_report = $this->config->get('csv_import_report');
-		$import_email = $this->config->get('csv_import_email');
-		$import_fields = $this->config->get('csv_import_fields');
-		$clear_p2c = $this->config->get('csv_import_clear_p2c');
-		$add_to_parent = $this->config->get('csv_import_add_to_parent');
+		$start_time = microtime(true); 
 
-		// Load text
-		$text_add = $this->language->get('text_add');
-		$text_update = $this->language->get('text_update');
-		$text_missing = $this->language->get('text_missing');
-		$text_hide = $this->language->get('text_hide');
-		$text_delete = $this->language->get('text_delete');
-		$text_exclude = $this->language->get('text_exclude');
-		$text_warring = $this->language->get('text_warring');
-		$warring_category_not_found = $this->language->get('warring_category_not_found');
-
-		$this->products_changed = array();
-		$products_missing = array();
-		$this->products_excluded = array();
+		$this->load->model('module/csv_import');
 		
-		// flags
-		$import_options = in_array('option', $import_fields);
-		$import_categories = in_array('category_id', $import_fields);
-		$import_manufacturers = in_array('manufacturer_id', $import_fields);
-		
-		// check Zip file
+		// Processing Zip file
 		if ($isZip) {
 			if (!is_file(DIR_DOWNLOAD.'import/'. $file) || !is_readable(DIR_DOWNLOAD.'import/'. $file)) {
 				$this->error['warning'] = "no access";
@@ -780,7 +492,8 @@ class ControllerModuleCsvImport extends Controller {
 
 				return false;
 			}
-			// unzip file entry
+			
+			// Unzip file entry
 			$zip = new ZipArchive;
 			$res = $zip->open(DIR_DOWNLOAD.'import/'. $file);
 			if ($res !== true) {
@@ -798,7 +511,7 @@ class ControllerModuleCsvImport extends Controller {
 			
 			$zipFile = $file;
 			
-			// get single file
+			// Get single file
 			$file = $zip->getNameIndex(0);
 			if ($file == false) {
 				$this->error['warning'] = 'zip no files with index 0';
@@ -817,7 +530,6 @@ class ControllerModuleCsvImport extends Controller {
 			$zip->close();		
 		}
 		
-		// TODO move to validate
 		if (!is_file(DIR_DOWNLOAD.'import/'.$file) || !is_readable(DIR_DOWNLOAD.'import/'.$file)) {
 			$this->error['warning'] = "no access";
 			$this->log->write('Import failed: Can\'t read file '.DIR_DOWNLOAD.'import/'.$file );
@@ -831,342 +543,29 @@ class ControllerModuleCsvImport extends Controller {
 
 			return false;
 		}
-		if (!flock($handle, LOCK_SH)) {
-			$this->error['warning'] = "lock file error";
-			$this->log->write('Import failed: Can\'t lock file '.DIR_DOWNLOAD.'import/'.$file );
+		
+		$this->model_module_csv_import->setCron($cron);
+		$this->model_module_csv_import->setCsvOptions(array(
+			'delimiter' => html_entity_decode($this->config->get('import_delimiter')),
+			'enclosure' => html_entity_decode($this->config->get('import_enclosure')),
+		));
+		
+		// Set CSV file handle for model
+		if (!$this->model_module_csv_import->setHandle($handle)) {
+			$this->error['warning'] = 'Invalid CSV file handle';
+			$this->log->write('Import failed: Invalid CSV file handle');
 
 			return false;
 		}
-
-		set_time_limit(0); 
-
-		$this->load->model('module/csv_import');
-		$csv_options = array(
-			'delimiter' => html_entity_decode($this->config->get('import_delimiter')),
-			'enclosure' => html_entity_decode($this->config->get('import_enclosure')),
-			'fields' 	=> $import_fields,
-		);
-
-		$this->load->model('catalog/product');
-		$this->load->model('catalog/category');
 		
-		if ($import_manufacturers) {
-			$this->load->model('catalog/manufacturer');
-			$manufacturer = $this->model_catalog_manufacturer->getManufacturers();
-			
-			$manufacturers = array();
-			foreach($manufacturer as $item) {
-				$manufacturers[$item['manufacturer_id']] = $item['name'];
-			}
-			unset($manufacturer);
-		}
+		set_time_limit(0);
 		
-		if ($import_options) {
-			// Get all options
-			$this->load->model('catalog/option');
-			$options = $this->model_catalog_option->getOptions(array());
-
-			foreach ($options as &$option) {
-				$option_values = $this->model_catalog_option->getOptionValues($option['option_id']);
-				$option['option_value'] = array();
-				$next_value_id = 0;
-				foreach ($option_values as $op) {
-					if ($next_value_id < (int)$op['option_value_id']) {
-						$next_value_id = (int)$op['option_value_id'];
-					}
-					$option['option_value'][] = array(
-						'option_value_id' => $op['option_value_id'],
-						'image' => $op['image'],
-						'sort_order' => $op['sort_order'],
-						'option_value_description' => array(
-							$language => array (
-								'name' => $op['name']
-							)
-						)
-					);
-				}
-				$option['next_value_id'] = ++$next_value_id;
-				$option['option_description'] = array(
-					$option['language_id'] => array(
-						'name' => $option['name']
-					)
-				);
-				unset($option['name']);
-			}
-			unset($option);
-		}
+		// Import
+		$result = $this->model_module_csv_import->execute();
 		
-		// Prepare products
-		if ($clear_p2c && $import_categories) {
-			$this->model_module_csv_import->unlinkP2C();
-		}
-
-		$this->cache->delete('product');
-		while (($product = $this->model_module_csv_import->getProduct($handle, $csv_options)) !== FALSE) {
-			if (!$product) continue;
-			$product_data = array(); 
-
-			// Link product to category
-			if (isset($product['category_id']) && !empty($product['category_id'])) {
-				$category = false;
-
-				if (is_int($product['category_id'])) {
-					$category = $this->model_catalog_category->getCategory($product['category_id']);
-				} else {
-					$category_path = strtolower($product['category_id']);
-					if ($add_to_parent) {
-						$categories = explode(self::CATEGORY_DELIMITER, $category_path); 
-						$path_from = array();
-						foreach ($categories as $cat) {
-							$path_from[] = $cat;
-							$category_path = implode(self::CATEGORY_DELIMITER, $path_from);
-							$category_id = $this->model_module_csv_import->getCategoryIdByPath($category_path, $category_key, self::CATEGORY_DELIMITER);
-							if ($category_id === false) {
-								$category = false;
-								break;
-							} else {
-								$category[] = $category_id;
-							}
-						}
-					} else {
-						$category = $this->model_module_csv_import->getCategoryIdByPath($category_path, $category_key, self::CATEGORY_DELIMITER);
-					}
-				}
-
-				if ($category === false) {
-					$this->products_warnings[] = array (
-							'key' => isset($product[$import_key]) ?  $product[$import_key] : $product['product_description'][$language][$import_key] ,
-							'name' => isset($product['product_description'][$language]['name']) ? $product['product_description'][$language]['name'] : '',
-							'error' => $category_path. ' - '. $warring_category_not_found,
-							'status' => $text_warring
-						);
-				}
-			}
-
-			if (in_array($import_key, $csv_options['fields'])) {
-				$product_info = array();
-
-				if (isset($product['product_id']) && !empty($product['product_id'])) {
-					$product_info = $this->model_catalog_product->getProduct($product['product_id']);
-				} else {
-
-					$product_data['filter_'.$import_key] = $product[$import_key]; // key exists
-
-					$result = $this->model_module_csv_import->getProducts($product_data);
-
-					if (count($result) > 0) {
-						foreach ($result as $info) {
-							if ($info[$import_key] == $product[$import_key]) {
-								$product_info = $info;
-								break;
-							}
-						}
-					}
-				}
-
-				if (!$product_info) {
-					// New product
-					$this->model_module_csv_import->loadTrigger('onBeforeProductInsert', $product);
-
-					$product = array_merge($this->model_module_csv_import->getDefaultProduct(), $product);
-
-					// Option
-					if (isset($product['option']) && !empty($product['option'])) {
-						$this->add_option($options, $product);
-					}
-
-					// Seo url
-					if (isset($product['keyword']) && empty($product['keyword'])) {
-						$product['keyword'] = $this->model_module_csv_import->getSeoUrl($product['product_description'][$language]['name']); //TODO redo
-					} elseif (!isset($product['keyword'])) {
-						$product['keyword'] = $this->model_module_csv_import->getSeoUrl($product['product_description'][$language]['name']); //TODO redo
-					}
-					
-					// Category
-					if (isset($product['category_id'])) {
-						if (is_array($category)) {
-							$product['product_category'] = $category;
-						} elseif (is_int($category)) {
-							$product['product_category'][] = $category;
-						}
-					}
-					
-					// Status
-					if (!isset($product['status'])) {
-						$product['status'] = '1';
-					}
-					
-					// Manufacturer
-					if (isset($product['manufacturer_id'])) {
-						$this->addManufacturer($product, $manufacturers);
-					}
-					
-					$this->model_catalog_product->addProduct($product);
-					// TODO REDO get new product_id
-					$result = $this->model_module_csv_import->getProducts($product_data);
-
-					if (count($result) > 0) {
-						foreach ($result as $info) {
-							if ($info[$import_key] == $product[$import_key]) {
-								$product_info = $info;
-								break;
-							}
-						}
-					}
-
-					$this->products_changed[$product_info['product_id']] = array(
-							'key' => isset($product[$import_key]) ?  $product[$import_key] : $product['product_description'][$language][$import_key],
-							'status' => $text_add,
-							'name' => isset($product['product_description'][$language]['name']) ? $product['product_description'][$language]['name'] : ''
-						);
-				} else {
-					// Existing product
-					$product_info = $this->model_catalog_product->getProduct($product_info['product_id']);
-					$product_description = array();
-
-					foreach ($product_info as $field => $value) {
-						switch ($field) {
-						case 'name':case 'meta_description':case 'meta_keyword':
-						case 'description':case 'tag':
-
-							$product_description[$language][$field] = $value;
-							unset($product_info[$field]);
-
-							break;
-						default:
-							break;
-						}
-					}
-					$product_info['product_description'] = $product_description;
-					$product_info['product_store'] = $this->model_catalog_product->getProductStores($product_info['product_id']);
-					//$product_info['product_related'] = $this->model_catalog_product->getProductRelated($product_info['product_id']);
-					if (isset($product['option']) && !empty($product['option'])) {
-						$product_info['product_option'] = $this->model_catalog_product->getProductOptions($product_info['product_id']);
-					}
-
-					switch ($this->config->get('if_exists')) {
-					case 0:
-						$this->model_module_csv_import->loadTrigger('onBeforeProductUpdate', $product_info);
-
-						$product['product_description'][$language] = array_merge($product_info['product_description'][$language], $product['product_description'][$language]);
-						$product = array_merge($product_info, $product);
-						// Option
-						if (isset($product['option']) && !empty($product['option'])) {
-							$this->add_option($options, $product);
-						}
-
-						// Seo url
-						$product['keyword'] = $this->model_module_csv_import->getKeyword($product_info['product_id']);
-						if (empty($product['keyword'])) {
-							$product['keyword'] = $this->model_module_csv_import->getSeoUrl($product['product_description'][$language]['name']); //TODO redo
-						}
-
-						// Additional categories
-						if (isset($product['category_id']) && $category !== false) {	
-							//$product['product_category'] = array();
-							$product['product_category'] = $this->model_catalog_product->getProductCategories($product_info['product_id']);
-								
-							if (is_array($category)) {
-								$product['product_category'] = array_keys(array_flip(array_merge($category, $product['product_category'])));
-							} elseif (is_int($category)) {
-								if (($key = array_search($category, $product['product_category'])) === false) {
-									$product['product_category'][] = $category;
-								}
-							}							
-						}
-						
-						// Manufacturer						
-						if (isset($product['manufacturer_id'])) {
-							$this->addManufacturer($product, $manufacturers);
-						}
-								
-						// Status
-						if (!isset($product['status'])) {
-							$product['status'] = '1';
-						}
-						
-						// TODO some array fields rewrites
-						$product['product_image'] = $this->model_catalog_product->getProductImages($product_info['product_id']); // D
-						$product['product_special'] = $this->model_catalog_product->getProductSpecials($product_info['product_id']); // D
-						
-						
-						$this->model_catalog_product->editProduct($product_info['product_id'], $product);
-						$this->products_changed[$product_info['product_id']] = array(
-								'key' => isset($product[$import_key]) ?  $product[$import_key] : $product['product_description'][$language][$import_key] ,
-								'status' => $text_update,
-								'name' => isset($product['product_description'][$language]['name']) ? $product['product_description'][$language]['name'] : ''
-							);
-						break;
-					case 1:
-						$this->products_excluded[$product_info['product_id']] = array(
-							'key' => isset($product_info[$import_key]) ?  $product_info[$import_key] : $product_info['product_description'][$language][$import_key] ,
-							'status' => $text_exclude,
-							'name' => isset($product_info['product_description'][$language]['name']) ? $product_info['product_description'][$language]['name'] : ''
-						);
-						break;
-					default:
-						break;
-					}
-				}
-			}
-			
-			$product = null;
-		}
-		if (!flock($handle, LOCK_UN)) {
-			$this->log->write('Import warring: Can\'t unlock file '.DIR_DOWNLOAD.'import/'.$file );
-		}
 		fclose($handle);
 		if ($isZip) {
 			unlink(DIR_DOWNLOAD.'import/'. $file);
-		}
-				
-		if ($import_options) {
-			// Add options
-			foreach ($options as &$option) {
-				// TODO check if option not exists and ADD
-				$option_id = $option['option_id'];
-				unset($option['option_id']);
-				$this->model_catalog_option->editOption($option_id, $option);
-			}
-			unset($option);
-			unset($options);
-		}
-
-		switch ($this->config->get('if_not_exists')) {
-		case 0:
-			$products_ids = array_keys($this->products_changed);
-			$not_in_import = $this->model_module_csv_import->getStoreProductDiff($products_ids);
-			$this->model_module_csv_import->disableProducts($not_in_import );
-			break;
-		case 1:
-			$products_ids = array_keys($this->products_changed);
-			$not_in_import = $this->model_module_csv_import->getStoreProductDiff($products_ids);
-
-			foreach ($not_in_import as $product_id) {
-				$this->model_catalog_product->deleteProduct($product_id);
-			}
-			break;
-		default:
-			break;
-		}
-
-		foreach ($not_in_import as $product_id) {
-			$product_info = $this->model_catalog_product->getProduct($product_id);
-
-			$this->products_excluded[$product_info['product_id']] = array(
-							'key' => isset($product_info[$import_key]) ?  $product_info[$import_key] : $product_info[$import_key] ,
-							'name' => isset($product_info['name']) ? $product_info['name'] : ''
-						);
-			switch ($this->config->get('if_not_exists')) {
-			case 0:
-				$this->products_excluded[$product_info['product_id']]['status'] = $text_hide;
-				break;
-			case 1:
-				$this->products_excluded[$product_info['product_id']]['status'] = $text_delete; // TODO not work!
-				break;
-			default:
-				break;
-			}
 		}
 		
 		$end_time = microtime(true);

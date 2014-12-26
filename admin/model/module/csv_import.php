@@ -1,7 +1,136 @@
 <?php
+
+
+
+
+
+
+
 class ModelModuleCsvImport extends Model {
+	
+	const DEFAULT_STOCK_STATUS_ID = 5;
+	
+	protected $itemsChanged = null;
+	protected $itemsWarning = null;
+	protected $itemsExclude = null;
+	
+	protected $importFields = array();
+	
+	private $_baseFields = array(
+		'model' => '',
+		'sku' => '',
+		'upc' => '',
+		'ean' => '',
+		'jan' => '',
+		'isbn' => '',
+		'mpn' => '',
+		'location' => '',
+		'price' => 0,
+		'tax_class_id' => 0,
+		'quantity' => 1,
+		'minimum' => 1,
+		'subtract' => 0,
+		'stock_status_id' => self::DEFAULT_STOCK_STATUS_ID,
+		'shipping' => 1,
+		'date_available' => date("Y-m-d"),
+		'length' => 0,
+		'width' => 0,
+		'height' => 0,
+		'length_class_id' => 1,
+		'weight' => 0,
+		'weight_class_id' => 1,
+		'status' => 1,
+		'sort_order' => 1,
+		'manufacturer_id' => 0,
+		'points' => 0,	
+	);	
+	
+	private $_handle = null;
+	private $_cron = false;
+	private $_csvOptions = array(
+		'delimiter' => ',',
+		'enclosure' => '"',
+	);
+	
 	private $error = array();
 	// TODO get LAST ERROR
+	
+	
+	/*
+	 * Execute import via cron tab task.
+	 *
+	 * @param boolean $cron whether execute import with cron
+	 */
+	public function setCron($cron)
+	{				
+		$this->_cron = (bool)$cron;
+	}
+	
+	/*
+	 * Set CSV file format options
+	 *
+	 * @param array $options
+	 */
+	public function setCsvOptions($options)
+	{				
+		if (empty($options)) {
+			return;
+		}
+		foreach ($this->_csvOptions as $option => $value) {
+			$this->_csvOptions[$option] = (isset($options[$option]) && !empty($options[$option])) ? $options[$option] : $value;
+		}
+	}
+	
+	/*
+	 * Set CSV file handle to read/wraite operation.
+	 *
+	 * @param object $handle CSV file handler
+	 * @return boolean.
+	 */
+	public function setHandle($handle)
+	{				
+		if ($handle) {
+			$this->_handle = $handle;
+			return true;
+		}
+		return false;
+	}
+	
+	/*
+	 * This function get product with base values.
+	 *
+	 * @param array  $values the castom fill values of product
+	 * @return product array.
+	 */
+	public function getBaseProduct($values = array()) 
+	{	
+		$baseProduct = array();
+		
+		foreach ($this->_baseFields as $field => $default) {
+			$baseProduct[$field] = isset($values[$field]) ? $values[$field] : $default;
+		}
+		return $baseProduct;	
+	}
+	
+	/*
+	 * Return product fields for creation
+	 * 
+	 * @return array 
+	 */
+	public function getBaseFields() 
+	{
+		return $this->_baseFields;
+	}
+	
+	/*
+	 * Set new base fields for product
+	 * 
+	 * @param array the new field=>defVal fields array 
+	 */
+	public function setBaseFields($baseFields) 
+	{
+		$this->_baseFields = $baseFields;
+	}
 	
 	/*
 	 * This function get product fields from import file
@@ -10,14 +139,12 @@ class ModelModuleCsvImport extends Model {
 	 *					delimiter, enclosure, fields(fields in import file)
 	 * @return array/false 
 	 */
-	public function getProduct($file, $options = array()) {	
-		$delimiter = (isset($options['delimiter'])) ? $options['delimiter'] : ',';
-		$enclosure = (isset($options['enclosure'])) ? $options['enclosure'] : '"';
-		
+	public function getItem() 
+	{			
 		$product = array();
 		
-		if (($fields = fgetcsv($file, 0, $delimiter, $enclosure)) === FALSE ) {			
-			return FALSE;
+		if (($fields = fgetcsv($this->_handle, 0, $this->_csvOptions['delimiter'], $this->_csvOptions['enclosure'])) === false ) {			
+			return false;
 		}
 		if ($fields[0] === null) {
 			return array();
@@ -25,12 +152,10 @@ class ModelModuleCsvImport extends Model {
 		
 		$this->loadTrigger('onAfterGetCsvFields', $fields);
 		
-		$fields_count = count($fields);
-		$options_fields_count = count($options['fields']);
-		if ($fields_count != $options_fields_count) {
+		if (count($fields) != count($this->importFields) {
 			return false;
 		}
-		$fields = array_combine($options['fields'], $fields); // TODO if false?
+		$fields = array_combine($this->importFields, $fields); // TODO if false?
 	
 		$this->load->model('localisation/language');
 		
@@ -265,154 +390,178 @@ class ModelModuleCsvImport extends Model {
 		return  preg_replace("/[^a-zA-Z0-9\/_|+-]/", '', $seo_url);
 	}
 	
-	/*
-	 * This function find the products by criteria.
-	 *
-	 * @param data - array of filters.
-	 * @return products array.
-	 */
-	public function getProducts($data = array()) {
-		$sql = "SELECT * FROM " . DB_PREFIX . "product p LEFT JOIN " . DB_PREFIX . "product_description pd ON (p.product_id = pd.product_id)";
-		
-		if (!empty($data['filter_category_id'])) {
-			$sql .= " LEFT JOIN " . DB_PREFIX . "product_to_category p2c ON (p.product_id = p2c.product_id)";			
-		}
+	
+	public function findProductBy($key, $value) 
+	{
+		$query = $this->db->query("SELECT DISTINCT *, (SELECT keyword FROM " . DB_PREFIX . "url_alias WHERE query = 'product_id=" . (int)$product_id . "') AS keyword FROM " . DB_PREFIX . "product p LEFT JOIN " . DB_PREFIX . "product_description pd ON (p.product_id = pd.product_id) WHERE p." . $key. " = '" . $value . "' AND pd.language_id = '" . (int)$this->config->get('config_language_id') . "'");
 				
-		$sql .= " WHERE pd.language_id = '" . (int)$this->config->get('config_language_id') . "'"; 
-		
-		if (!empty($data['filter_name'])) {
-			$sql .= " AND pd.name LIKE '" . $this->db->escape($data['filter_name']) . "'";
-		}
-
-		if (!empty($data['filter_model'])) {
-			$sql .= " AND p.model LIKE '" . $this->db->escape($data['filter_model']) . "'";
-		}
-		
-		if (!empty($data['filter_price'])) {
-			$sql .= " AND p.price LIKE '" . $this->db->escape($data['filter_price']) . "%'";
-		}
-		
-		if (isset($data['filter_quantity']) && !is_null($data['filter_quantity'])) {
-			$sql .= " AND p.quantity = '" . $this->db->escape($data['filter_quantity']) . "'";
-		}
-		
-		if (isset($data['filter_status']) && !is_null($data['filter_status'])) {
-			$sql .= " AND p.status = '" . (int)$data['filter_status'] . "'";
-		}
-		
-		if (isset($data['filter_sku']) && !is_null($data['filter_sku'])) {
-			$sql .= " AND p.sku = '" . $data['filter_sku'] . "'";
-		}
-		
-		$sql .= " GROUP BY p.product_id";
-					
-		$sort_data = array(
-			'pd.name',
-			'p.model',
-			'p.price',
-			'p.quantity',
-			'p.status',
-			'p.sort_order'
-		);	
-		
-		if (isset($data['sort']) && in_array($data['sort'], $sort_data)) {
-			$sql .= " ORDER BY " . $data['sort'];	
-		} else {
-			$sql .= " ORDER BY pd.name";	
-		}
-		
-		if (isset($data['order']) && ($data['order'] == 'DESC')) {
-			$sql .= " DESC";
-		} else {
-			$sql .= " ASC";
-		}
-	
-		if (isset($data['start']) || isset($data['limit'])) {
-			if ($data['start'] < 0) {
-				$data['start'] = 0;
-			}				
-
-			if ($data['limit'] < 1) {
-				$data['limit'] = 20;
-			}	
-		
-			$sql .= " LIMIT " . (int)$data['start'] . "," . (int)$data['limit'];
-		}	
-		$query = $this->db->query($sql);
-	
-		return $query->rows;
+		return $query->row;
 	}
 	
 	/*
-	 * This function get product with default values.
-	 *
-	 * @return product array.
+	 * This function make import from file to store
+	 * @param cron - true/false indicate that module run on cron
 	 */
-	public function getDefaultProduct() {
+	protected function execute() {
+	
+		// Load config
+		$file = ($cron) ? self::CRON_IMPORT_FILENAME : $this->config->get('csv_import_file');
+		$isZip = (strtolower(pathinfo($file, PATHINFO_EXTENSION)) == 'zip');
+		$fileName = pathinfo($file, PATHINFO_FILENAME);
+		$language = $this->config->get('config_language_id');
+		$importKey = $this->config->get('import_key');
+		$category_key = $this->config->get('category_key');
+		$import_report = $this->config->get('csv_import_report');
+		$import_email = $this->config->get('csv_import_email');
+		$this->importFields = $this->config->get('csv_import_fields');
+		$clear_p2c = $this->config->get('csv_import_clear_p2c');
+		$add_to_parent = $this->config->get('csv_import_add_to_parent');
+
+		// Load text
+		$text_add = $this->language->get('text_add');
+		$text_update = $this->language->get('text_update');
+		$text_missing = $this->language->get('text_missing');
+		$text_hide = $this->language->get('text_hide');
+		$text_delete = $this->language->get('text_delete');
+		$text_exclude = $this->language->get('text_exclude');
+		$text_warring = $this->language->get('text_warring');
+		$warring_category_not_found = $this->language->get('warring_category_not_found');
+
+		$this->itemsChanged = array();
+		$products_missing = array(); // TODO fix 
+		$this->itemsExclude = array();
 		
-		$this->load->model('localisation/language');
-		$languages = $this->model_localisation_language->getLanguages();
+		// flags
+		$import_options = in_array('option', $this->importFields);
+		$import_categories = in_array('category_id', $this->importFields);
+		$import_manufacturers = in_array('manufacturer_id', $this->importFields);
 		
-		$product_description = array();
-		foreach($languages as $lang){  
-			$lang_id = $lang['language_id'];
-			$product_description[$lang_id] = array(
-				'name' =>  '',
-				'meta_description' => '',
-				'meta_keyword' => '',
-				'description' => '',
-				'tag' => 	''	
-			);
+		// Lock file before read
+		if (!flock($handle, LOCK_SH)) {
+			$this->error['warning'] = "lock file error";
+			$this->log->write('Import failed: Can\'t lock file '.DIR_DOWNLOAD.'import/'.$file );
+
+			return false;
 		}
-		$product = array(
-			'product_description' => $product_description,
-			'model' => '',
-			'sku' => '',
-			'upc' => '',
-			'ean' => '',
-			'jan' => '',
-			'isbn' => '',
-			'mpn' => '',
-			'location' => '',
-			'price' => 0,
-			'tax_class_id' => 0,
-			'quantity' => 1,
-			'minimum' => 1,
-			'subtract' => 0,
-			'stock_status_id' => 5,
-			'shipping' => 1,
-			'keyword' => '',
-			'image' => '',
-			'date_available' => date("Y-m-d"),
-			'length' => 0,
-			'width' => 0,
-			'height' => 0,
-			'length_class_id' => 1,
-			'weight' => 0,
-			'weight_class_id' => 1,
-			'status' => 1,
-			'sort_order' => 1,
-			'manufacturer' => '',
-			'manufacturer_id' => 0,
-			//'product_category' => array(),
-			'filter' => array(),
-			'product_store' => array(0),
-			'download' => array(),
-			'related' => array(),
-			'product_option' => array(),
-			'points' => array(),
-			'product_reward' => array(
-					1 => array(
-							'points' => 0
-						)
-				),
-			'product_layout' => array(
-					array(
-							'layout_id' => '',
-						)
-				)
-		);	
-		return $product;
+
+		$this->load->model('catalog/product');
+		$this->load->model('catalog/category');
+
+		$this->cache->delete('product');
+		
+		// TODO check import key		
+		
+		while (($item = $this->getItem() !== false) {
+			// Skip empty CSV lines
+			if (!$item) {
+				continue;
+			}
+			
+			// Check import key in item data
+			if (!isset($item[$importKey]) || empty($item[$importKey])) {
+				// TODO Mark this product as skiped
+				continue;
+			}
+			
+			// Try to find product by import key
+			$result = $this->findProductBy($importKey, $item[$importKey]);
+			
+			if (empty($result)) {
+				// Initialize new new base product by CSV values and add them to db
+				$baseProduct = $this->getBaseProduct($item);
+				
+				// TODO trigger beforeAdd
+				
+				$this->model_catalog_product->addProduct($baseProduct);
+				// IMPORTANT $baseProduct must contain only base fields
+				// Get new product Id
+				$productId = $this->db->getLastId();
+			} else {
+				// Get existing product Id
+				$productId = $result['product_id'];
+			}
+			
+			// Get product data
+			$product = $this->model_catalog_product->getProduct($productId);
+			
+			/* Update additional product parameters if it exist in importFields */
+			
+			// Category processing
+			if (isset($this->importFields['category_id']) && !empty($this->importFields['category_id'])) {
+				$product = array_merge($product, array('product_category' => $this->model_catalog_product->getProductCategories($productId)));
+			}
+			$product = array_merge($product, array('product_attribute' => $this->model_catalog_product->getProductAttributes($productId)));
+			$product = array_merge($product, array('product_description' => $this->model_catalog_product->getProductDescriptions($productId)));			
+			$product = array_merge($product, array('product_discount' => $this->model_catalog_product->getProductDiscounts($productId)));
+			$product = array_merge($product, array('product_filter' => $this->model_catalog_product->getProductFilters($productId)));
+			$product = array_merge($product, array('product_image' => $this->model_catalog_product->getProductImages($productId)));		
+			$product = array_merge($product, array('product_option' => $this->model_catalog_product->getProductOptions($productId)));
+			$product = array_merge($product, array('product_related' => $this->model_catalog_product->getProductRelated($productId)));
+			$product = array_merge($product, array('product_reward' => $this->model_catalog_product->getProductRewards($productId)));
+			$product = array_merge($product, array('product_special' => $this->model_catalog_product->getProductSpecials($productId)));
+			$product = array_merge($product, array('product_download' => $this->model_catalog_product->getProductDownloads($productId)));
+			$product = array_merge($product, array('product_layout' => $this->model_catalog_product->getProductLayouts($productId)));
+			$product = array_merge($product, array('product_store' => $this->model_catalog_product->getProductStores($productId)));
+			
+			// TODO trigger beforeUpdate
+			
+			// Update product data from CSV
+			$this->model_catalog_product->editProduct($productId, $product);
+			
+			$product = null;
+		}
+		
+		if (!flock($handle, LOCK_UN)) {
+			$this->log->write('Import warring: Can\'t unlock file '.DIR_DOWNLOAD.'import/'.$file );
+		}
+
+		switch ($this->config->get('if_not_exists')) {
+		case 0:
+			$products_ids = array_keys($this->itemsChanged);
+			$not_in_import = $this->getStoreProductDiff($products_ids);
+			$this->disableProducts($not_in_import );
+			break;
+		case 1:
+			$products_ids = array_keys($this->itemsChanged);
+			$not_in_import = $this->getStoreProductDiff($products_ids);
+
+			foreach ($not_in_import as $product_id) {
+				$this->model_catalog_product->deleteProduct($product_id);
+			}
+			break;
+		default:
+			break;
+		}
+
+		foreach ($not_in_import as $product_id) {
+			$product_info = $this->model_catalog_product->getProduct($product_id);
+
+			$this->itemsExclude[$product_info['product_id']] = array(
+							'key' => isset($product_info[$importKey]) ?  $product_info[$importKey] : $product_info[$importKey] ,
+							'name' => isset($product_info['name']) ? $product_info['name'] : ''
+						);
+			switch ($this->config->get('if_not_exists')) {
+			case 0:
+				$this->itemsExclude[$product_info['product_id']]['status'] = $text_hide;
+				break;
+			case 1:
+				$this->itemsExclude[$product_info['product_id']]['status'] = $text_delete; // TODO not work!
+				break;
+			default:
+				break;
+			}
+		}
+		
+		$this->log->write('Import complete: '."\n\t\t".'-> success: '.count($this->itemsChanged)."\n\t\t".'-> exclude: '.count($this->itemsExclude));
+		
+		if (!$this->_cron) {
+			return json_encode(array (
+				'success' => $this->itemsChanged,
+				'warnings' => $this->itemsWarning,
+				'exclude' => $this->itemsExclude,
+			));
+		}
+		return true;
 	}
 }
 ?>
