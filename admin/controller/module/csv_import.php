@@ -481,7 +481,9 @@ class ControllerModuleCsvImport extends Controller {
 
 		$start_memory_usage = memory_get_usage();
 		$start_time = microtime(true); 
-
+		
+		$this->load->model('catalog/product');
+		$this->load->model('catalog/category');
 		$this->load->model('module/csv_import');
 		
 		// Processing Zip file
@@ -544,7 +546,9 @@ class ControllerModuleCsvImport extends Controller {
 			return false;
 		}
 		
+		// Set cron flag
 		$this->model_module_csv_import->setCron($cron);
+		
 		$this->model_module_csv_import->setCsvOptions(array(
 			'delimiter' => html_entity_decode($this->config->get('import_delimiter')),
 			'enclosure' => html_entity_decode($this->config->get('import_enclosure')),
@@ -558,11 +562,66 @@ class ControllerModuleCsvImport extends Controller {
 			return false;
 		}
 		
+		// Lock file before read
+		if (!flock($handle, LOCK_SH)) {
+			$this->error['warning'] = "lock file error";
+			$this->log->write('Import failed: Can\'t lock file '.DIR_DOWNLOAD.'import/'.$file );
+
+			return false;
+		}
+		
 		set_time_limit(0);
+		$this->cache->delete('product');
 		
 		// Import
-		$result = $this->model_module_csv_import->execute();
+		while (($item = $this->model_module_csv_import->getItem() !== false) {
+			// Skip empty CSV lines
+			if (!$item) {
+				continue;
+			}
+			
+			// Check import key in item data
+			if (!isset($item[$importKey]) || empty($item[$importKey])) {
+				// TODO Mark this product as skiped
+				continue;
+			}
+			
+			// Try to find product by import key
+			$result = $this->model_module_csv_import->findProductBy($importKey, $item[$importKey]);
+			
+			if (empty($result)) {
+				// Initialize new new base product by CSV values
+				$baseProduct = $this->model_module_csv_import->getBaseProduct($item);
+				
+				// TODO !----------- trigger beforeAdd -----------!
+				
+				$this->model_catalog_product->addProduct($baseProduct);
+				// IMPORTANT $baseProduct must contain only base fields
+				// Get new product Id
+				$productId = $this->db->getLastId();
+			} else {
+				// Get existing product Id
+				$productId = $result['product_id'];
+			}
+			
+			// Get product data
+			$product = $this->model_catalog_product->getProduct($productId);
+			
+			/* Update additional product parameters if it exist in import fields */			
+			$product = $this->model_module_csv_import->extendProduct($product, $item);
+			
+			// TODO !----------- trigger beforeUpdate -------------!
+			
+			// Update product data from CSV
+			$this->model_catalog_product->editProduct($productId, $product);
+			
+			$product = null;
+		}
 		
+		// Unlock & close file handle
+		if (!flock($handle, LOCK_UN)) {
+			$this->log->write('Import warring: Can\'t unlock file '.DIR_DOWNLOAD.'import/'.$file );
+		}
 		fclose($handle);
 		if ($isZip) {
 			unlink(DIR_DOWNLOAD.'import/'. $file);

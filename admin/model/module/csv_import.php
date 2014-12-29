@@ -133,51 +133,116 @@ class ModelModuleCsvImport extends Model {
 	}
 	
 	/*
-	 * This function get product fields from import file
-	 * @param file - handle of file
-	 * @param options - parameters of import file:
-	 *					delimiter, enclosure, fields(fields in import file)
-	 * @return array/false 
+	 * Wrapper for fgetcsv
+	 * 
+	 * @return array or false 
 	 */
 	public function getItem() 
 	{			
-		$product = array();
-		
-		if (($fields = fgetcsv($this->_handle, 0, $this->_csvOptions['delimiter'], $this->_csvOptions['enclosure'])) === false ) {			
+		$fields = fgetcsv($this->_handle, 0, $this->_csvOptions['delimiter'], $this->_csvOptions['enclosure']);
+		if ($fields === false ) {			
 			return false;
 		}
 		if ($fields[0] === null) {
 			return array();
 		}
-		
-		$this->loadTrigger('onAfterGetCsvFields', $fields);
-		
-		if (count($fields) != count($this->importFields) {
-			return false;
-		}
-		$fields = array_combine($this->importFields, $fields); // TODO if false?
+		return $fields;
+	}
 	
+	/*
+	 * This function make import from file to store
+	 * 
+	 * @param array $product the array returns $catalog_model_product->getProduct($product_id)
+	 * @param array $extender fields returned from CSV file
+	 */
+	protected function extendProduct($product, $extender) 
+	{
+		$this->load->model('catalog/product');
+		$this->load->model('catalog/category');
 		$this->load->model('localisation/language');
 		
-		$languages = $this->model_localisation_language->getLanguages();
+		$language_id = $this->config->get('config_language_id');		
+		$productId = $product['product_id'];
 		
-		foreach ($fields as $key => $value) {
-			switch ($key) {
-			case 'name':case 'meta_description':case 'meta_keyword':
-			case 'description':case 'tag':
-			
-				foreach($languages as $lang){               
-					$product['product_description'][$lang['language_id']][$key] = $value;
-				}
-				break;	
-			default:
-				$product[$key] = $value;
-				break;
-			}			
+		if (count($extender) != count($this->importFields) {
+			return false;
+		}
+		$fields = array_combine($this->importFields, $extender);
+		
+		/* Update description fields without condition */
+		
+		// Get current description fields
+		$product = array_merge($product, array('product_description' => $this->model_catalog_product->getProductDescriptions($productId)));
+		
+		// Rewrite description fields from import for current language
+		foreach ($product['product_description'][$language_id] as $key => $value) {
+			if (isset($this->importFields[$key])) {
+				$product['product_description'][$language_id][$key] = $this->importFields[$key];
+			}
 		}
 		
+		// Category processing
+		if (isset($this->importFields['category_id']) && !empty($this->importFields['category_id'])) {
+			$this->processCategory($this->importFields['category_id']);
+		}
+		
+		//$product = array_merge($product, array('product_category' => $this->model_catalog_product->getProductCategories($productId)));		
+		//$product = array_merge($product, array('product_image' => $this->model_catalog_product->getProductImages($productId)));
+		
+		//$product = array_merge($product, array('product_attribute' => $this->model_catalog_product->getProductAttributes($productId)));
+		//$product = array_merge($product, array('product_discount' => $this->model_catalog_product->getProductDiscounts($productId)));
+		//$product = array_merge($product, array('product_filter' => $this->model_catalog_product->getProductFilters($productId)));
+		//$product = array_merge($product, array('product_option' => $this->model_catalog_product->getProductOptions($productId)));
+		//$product = array_merge($product, array('product_related' => $this->model_catalog_product->getProductRelated($productId)));
+		//$product = array_merge($product, array('product_reward' => $this->model_catalog_product->getProductRewards($productId)));
+		//$product = array_merge($product, array('product_special' => $this->model_catalog_product->getProductSpecials($productId)));
+		//$product = array_merge($product, array('product_download' => $this->model_catalog_product->getProductDownloads($productId)));
+		//$product = array_merge($product, array('product_layout' => $this->model_catalog_product->getProductLayouts($productId)));
+		//$product = array_merge($product, array('product_store' => $this->model_catalog_product->getProductStores($productId)));
+	
 		return $product;
 	}	
+	
+	/*
+	 * Process category from CSV
+	 * 
+	 * @return integer category_id or false
+	 */
+	protected function processCategory($categoryPath) {
+		$this->load->model('catalog/category');
+	
+		$categories = explode($this->categoryDelimiter, $categoryPath);		
+		$path = array();
+		
+		foreach ($categories as $category) {
+			$path[] = $category;
+			$category_id = $this->getCategoryIdByPath(implode($this->categoryDelimiter, $path));
+			
+			if ($category_id === false) {
+				
+			}
+		}		
+	}
+	
+	/**
+	 * Return category_id from path string
+	 *	
+	 * @return integer category_id or false
+	 */
+	public function getCategoryIdByPath($categoryPath,  $nameField = 'name') {
+		$query = $this->db->query(
+			'SELECT DISTINCT c.category_id ' .
+			'FROM ' . DB_PREFIX . 'category c ' .
+				'LEFT JOIN ' . DB_PREFIX . 'category_description cd2 ON (c.category_id = cd2.category_id) ' . 
+			'WHERE TRIM(LOWER(CONCAT_WS(\'' . $this->categoryDelimiter . '\',(SELECT LOWER(GROUP_CONCAT(cd1.' . $nameField . ' ORDER BY level SEPARATOR \'' . $this->categoryDelimiter . '\'))' . 
+				'FROM ' . DB_PREFIX . 'category_path cp ' . 
+				'LEFT JOIN ' . DB_PREFIX . 'category_description cd1 ON (cp.path_id = cd1.category_id AND cp.category_id != cp.path_id) ' .
+				'WHERE cp.category_id = c.category_id ' .
+				'GROUP BY cp.category_id ' .
+			'), cd2.' . $nameField . '))) LIKE \'' . $categoryPath . '\'';
+		);
+		return !empty($query->rows) ? $query->rows[0]['category_id'] : false;
+	}
 	
 	/*
 	 * This function realize plugin system.
@@ -317,20 +382,6 @@ class ModelModuleCsvImport extends Model {
 		return !empty($query->rows[0]) ? $query->rows[0] : false;
 	}
 	
-	public function getCategoryIdByPath($category_path, $category_field, $delimeter = '>') {
-		$sql = 'SELECT DISTINCT c.category_id
-				FROM ' . DB_PREFIX . 'category c
-				LEFT JOIN ' . DB_PREFIX . 'category_description cd2 ON (c.category_id = cd2.category_id) 
-				WHERE TRIM(LOWER(CONCAT_WS(\''.$delimeter.'\',(SELECT LOWER(GROUP_CONCAT(cd1.'.$category_field.' ORDER BY level SEPARATOR \''.$delimeter.'\')) 
-					 FROM ' . DB_PREFIX . 'category_path cp 
-					 LEFT JOIN ' . DB_PREFIX . 'category_description cd1 ON (cp.path_id = cd1.category_id AND cp.category_id != cp.path_id) 
-					 WHERE cp.category_id = c.category_id  
-					 GROUP BY cp.category_id
-					), cd2.'.$category_field.'))) LIKE \''. $category_path. '\'';
-		$query = $this->db->query($sql);
-		return !empty($query->rows) ? $query->rows[0]['category_id'] : false;
-	}
-	
 	/*
 	 * This function search alias of url fo product.
 	 *
@@ -342,17 +393,6 @@ class ModelModuleCsvImport extends Model {
 	
 		$query = $this->db->query($sql);
 		return !empty($query->rows) ? $query->rows[0]['keyword'] : '';
-	}
-	
-	/*
-	 * This function search last inserted product_id by date.
-	 * @return product_id.
-	 */
-	public function getLastProductId() {
-		// $sql = "SELECT `product_id` FROM " . DB_PREFIX . "product WHERE date_added <= NOW()";
-	
-		// $query = $this->db->query($sql);
-		// return !empty($query->rows) ? $query->rows[0]['keyword'] : '';
 	}
 	
 	/*
@@ -370,7 +410,7 @@ class ModelModuleCsvImport extends Model {
 	}
 	
 	/*
-	 * This function generate friendly url.
+	 * Govnocode
 	 *
 	 * @param name - string for translate.
 	 * @return string.
@@ -390,178 +430,18 @@ class ModelModuleCsvImport extends Model {
 		return  preg_replace("/[^a-zA-Z0-9\/_|+-]/", '', $seo_url);
 	}
 	
-	
+	/*
+	 * Search product by unique field
+	 * 
+	 * @param string $key
+	 * @param string $value
+	 */
 	public function findProductBy($key, $value) 
 	{
-		$query = $this->db->query("SELECT DISTINCT *, (SELECT keyword FROM " . DB_PREFIX . "url_alias WHERE query = 'product_id=" . (int)$product_id . "') AS keyword FROM " . DB_PREFIX . "product p LEFT JOIN " . DB_PREFIX . "product_description pd ON (p.product_id = pd.product_id) WHERE p." . $key. " = '" . $value . "' AND pd.language_id = '" . (int)$this->config->get('config_language_id') . "'");
+		$query = $this->db->query("SELECT DISTINCT * FROM " . DB_PREFIX . "product p LEFT JOIN " . DB_PREFIX . "product_description pd ON (p.product_id = pd.product_id) WHERE p." . $key. " = '" . $value . "' AND pd.language_id = '" . (int)$this->config->get('config_language_id') . "'");
 				
 		return $query->row;
 	}
-	
-	/*
-	 * This function make import from file to store
-	 * @param cron - true/false indicate that module run on cron
-	 */
-	protected function execute() {
-	
-		// Load config
-		$file = ($cron) ? self::CRON_IMPORT_FILENAME : $this->config->get('csv_import_file');
-		$isZip = (strtolower(pathinfo($file, PATHINFO_EXTENSION)) == 'zip');
-		$fileName = pathinfo($file, PATHINFO_FILENAME);
-		$language = $this->config->get('config_language_id');
-		$importKey = $this->config->get('import_key');
-		$category_key = $this->config->get('category_key');
-		$import_report = $this->config->get('csv_import_report');
-		$import_email = $this->config->get('csv_import_email');
-		$this->importFields = $this->config->get('csv_import_fields');
-		$clear_p2c = $this->config->get('csv_import_clear_p2c');
-		$add_to_parent = $this->config->get('csv_import_add_to_parent');
 
-		// Load text
-		$text_add = $this->language->get('text_add');
-		$text_update = $this->language->get('text_update');
-		$text_missing = $this->language->get('text_missing');
-		$text_hide = $this->language->get('text_hide');
-		$text_delete = $this->language->get('text_delete');
-		$text_exclude = $this->language->get('text_exclude');
-		$text_warring = $this->language->get('text_warring');
-		$warring_category_not_found = $this->language->get('warring_category_not_found');
-
-		$this->itemsChanged = array();
-		$products_missing = array(); // TODO fix 
-		$this->itemsExclude = array();
-		
-		// flags
-		$import_options = in_array('option', $this->importFields);
-		$import_categories = in_array('category_id', $this->importFields);
-		$import_manufacturers = in_array('manufacturer_id', $this->importFields);
-		
-		// Lock file before read
-		if (!flock($handle, LOCK_SH)) {
-			$this->error['warning'] = "lock file error";
-			$this->log->write('Import failed: Can\'t lock file '.DIR_DOWNLOAD.'import/'.$file );
-
-			return false;
-		}
-
-		$this->load->model('catalog/product');
-		$this->load->model('catalog/category');
-
-		$this->cache->delete('product');
-		
-		// TODO check import key		
-		
-		while (($item = $this->getItem() !== false) {
-			// Skip empty CSV lines
-			if (!$item) {
-				continue;
-			}
-			
-			// Check import key in item data
-			if (!isset($item[$importKey]) || empty($item[$importKey])) {
-				// TODO Mark this product as skiped
-				continue;
-			}
-			
-			// Try to find product by import key
-			$result = $this->findProductBy($importKey, $item[$importKey]);
-			
-			if (empty($result)) {
-				// Initialize new new base product by CSV values and add them to db
-				$baseProduct = $this->getBaseProduct($item);
-				
-				// TODO trigger beforeAdd
-				
-				$this->model_catalog_product->addProduct($baseProduct);
-				// IMPORTANT $baseProduct must contain only base fields
-				// Get new product Id
-				$productId = $this->db->getLastId();
-			} else {
-				// Get existing product Id
-				$productId = $result['product_id'];
-			}
-			
-			// Get product data
-			$product = $this->model_catalog_product->getProduct($productId);
-			
-			/* Update additional product parameters if it exist in importFields */
-			
-			// Category processing
-			if (isset($this->importFields['category_id']) && !empty($this->importFields['category_id'])) {
-				$product = array_merge($product, array('product_category' => $this->model_catalog_product->getProductCategories($productId)));
-			}
-			$product = array_merge($product, array('product_attribute' => $this->model_catalog_product->getProductAttributes($productId)));
-			$product = array_merge($product, array('product_description' => $this->model_catalog_product->getProductDescriptions($productId)));			
-			$product = array_merge($product, array('product_discount' => $this->model_catalog_product->getProductDiscounts($productId)));
-			$product = array_merge($product, array('product_filter' => $this->model_catalog_product->getProductFilters($productId)));
-			$product = array_merge($product, array('product_image' => $this->model_catalog_product->getProductImages($productId)));		
-			$product = array_merge($product, array('product_option' => $this->model_catalog_product->getProductOptions($productId)));
-			$product = array_merge($product, array('product_related' => $this->model_catalog_product->getProductRelated($productId)));
-			$product = array_merge($product, array('product_reward' => $this->model_catalog_product->getProductRewards($productId)));
-			$product = array_merge($product, array('product_special' => $this->model_catalog_product->getProductSpecials($productId)));
-			$product = array_merge($product, array('product_download' => $this->model_catalog_product->getProductDownloads($productId)));
-			$product = array_merge($product, array('product_layout' => $this->model_catalog_product->getProductLayouts($productId)));
-			$product = array_merge($product, array('product_store' => $this->model_catalog_product->getProductStores($productId)));
-			
-			// TODO trigger beforeUpdate
-			
-			// Update product data from CSV
-			$this->model_catalog_product->editProduct($productId, $product);
-			
-			$product = null;
-		}
-		
-		if (!flock($handle, LOCK_UN)) {
-			$this->log->write('Import warring: Can\'t unlock file '.DIR_DOWNLOAD.'import/'.$file );
-		}
-
-		switch ($this->config->get('if_not_exists')) {
-		case 0:
-			$products_ids = array_keys($this->itemsChanged);
-			$not_in_import = $this->getStoreProductDiff($products_ids);
-			$this->disableProducts($not_in_import );
-			break;
-		case 1:
-			$products_ids = array_keys($this->itemsChanged);
-			$not_in_import = $this->getStoreProductDiff($products_ids);
-
-			foreach ($not_in_import as $product_id) {
-				$this->model_catalog_product->deleteProduct($product_id);
-			}
-			break;
-		default:
-			break;
-		}
-
-		foreach ($not_in_import as $product_id) {
-			$product_info = $this->model_catalog_product->getProduct($product_id);
-
-			$this->itemsExclude[$product_info['product_id']] = array(
-							'key' => isset($product_info[$importKey]) ?  $product_info[$importKey] : $product_info[$importKey] ,
-							'name' => isset($product_info['name']) ? $product_info['name'] : ''
-						);
-			switch ($this->config->get('if_not_exists')) {
-			case 0:
-				$this->itemsExclude[$product_info['product_id']]['status'] = $text_hide;
-				break;
-			case 1:
-				$this->itemsExclude[$product_info['product_id']]['status'] = $text_delete; // TODO not work!
-				break;
-			default:
-				break;
-			}
-		}
-		
-		$this->log->write('Import complete: '."\n\t\t".'-> success: '.count($this->itemsChanged)."\n\t\t".'-> exclude: '.count($this->itemsExclude));
-		
-		if (!$this->_cron) {
-			return json_encode(array (
-				'success' => $this->itemsChanged,
-				'warnings' => $this->itemsWarning,
-				'exclude' => $this->itemsExclude,
-			));
-		}
-		return true;
-	}
 }
 ?>
