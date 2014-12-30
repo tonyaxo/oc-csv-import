@@ -75,8 +75,40 @@
 		<tr>
           <td colspan="2">
 			<div id="tabs" class="htabs">
+				<a href="#tab-basic"><?php echo $tab_general; ?></a>
 				<a href="#tab-product"><?php echo $tab_products; ?></a>
 				<a href="#tab-category"><?php echo $tab_categories; ?></a>
+			</div>
+			<div id="tab-basic">
+				<table class="form">
+					<tr>
+					  <td><?php echo $entry_skip_first ?></td>
+					  <td>
+						<select name="import_skip_first" id="import_skip_first">
+							<?php if ($import_skip_first) { ?>
+								<option value="1" selected="selected"><?php echo $text_enabled; ?></option>
+								<option value="0"><?php echo $text_disabled; ?></option>
+							<?php } else { ?>
+								<option value="1"><?php echo $text_enabled; ?></option>
+								<option value="0" selected="selected"><?php echo $text_disabled; ?></option>
+							<?php } ?>
+						</select>
+					  </td>
+					</tr>
+					<tr>
+					  <td><?php echo $entry_csv_delimiter ?></td>
+					  <td>
+						<input type="text" name="import_delimiter" id="import_delimiter" size="2" value="<?php echo $import_delimiter ?>" />
+					  </td>
+					</tr>
+					<tr>
+					  <td><?php echo $entry_csv_enclosure ?></td>
+					  <td>
+						<input type="text" name="import_enclosure" id="import_enclosure" size="2" value="<?php echo $import_enclosure ?>" />
+					  </td>
+					</tr>
+					
+				</table>
 			</div>
 			<div id="tab-product">
 				<table class="form">
@@ -137,6 +169,18 @@
 			</div>
 			<div id="tab-category">
 				<table class="form">
+					<tr>
+					  <td><?php echo $entry_create_category; ?></td>
+					  <td><select name="csv_import_create_category">
+						  <?php if ($csv_import_create_category) { ?>
+						  <option value="1" selected="selected"><?php echo $text_enabled; ?></option>
+						  <option value="0"><?php echo $text_disabled; ?></option>
+						  <?php } else { ?>
+						  <option value="1"><?php echo $text_enabled; ?></option>
+						  <option value="0" selected="selected"><?php echo $text_disabled; ?></option>
+						  <?php } ?>
+						</select></td>
+					</tr>
 					<tr>
 					  <td><?php echo $entry_clear_p2c; ?></td>
 					  <td><select name="csv_import_clear_p2c">

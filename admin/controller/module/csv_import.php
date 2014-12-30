@@ -477,7 +477,8 @@ class ControllerModuleCsvImport extends Controller {
 	 * This function make import from file to store
 	 * @param cron - true/false indicate that module run on cron
 	 */
-	protected function import($cron = false) {
+	protected function import($cron = false) 
+	{
 
 		$start_memory_usage = memory_get_usage();
 		$start_time = microtime(true); 
