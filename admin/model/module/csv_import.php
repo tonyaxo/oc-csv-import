@@ -209,17 +209,21 @@ class ModelModuleCsvImport extends Model {
 	 * @return integer category_id or false
 	 */
 	protected function processCategory($categoryPath) {
-		$this->load->model('catalog/category');
+		
+		$create = $this->config->get('csv_import_create_category');
 	
 		$categories = explode($this->categoryDelimiter, $categoryPath);		
 		$path = array();
+		$previousId = 0;
 		
 		foreach ($categories as $category) {
 			$path[] = $category;
-			$category_id = $this->getCategoryIdByPath(implode($this->categoryDelimiter, $path));
+			$categoryId = $this->getCategoryIdByPath(implode($this->categoryDelimiter, $path));
 			
-			if ($category_id === false) {
-				
+			if ($category_id !== false) {
+				$previousId = $categoryId;
+			} elseif ($create) {
+				//$this->model_catalog_category->addCategory
 			}
 		}		
 	}
