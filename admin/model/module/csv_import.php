@@ -32,7 +32,7 @@ class ModelModuleCsvImport extends Model {
 		'subtract' => 0,
 		'stock_status_id' => self::DEFAULT_STOCK_STATUS_ID,
 		'shipping' => 1,
-		'date_available' => date("Y-m-d"),
+		'date_available' => '',
 		'length' => 0,
 		'width' => 0,
 		'height' => 0,
@@ -161,10 +161,10 @@ class ModelModuleCsvImport extends Model {
 		$this->load->model('catalog/category');
 		$this->load->model('localisation/language');
 		
-		$language_id = $this->config->get('config_language_id');		
+		$languageId = $this->config->get('config_language_id');		
 		$productId = $product['product_id'];
 		
-		if (count($extender) != count($this->importFields) {
+		if (count($extender) != count($this->importFields)) {
 			return false;
 		}
 		$fields = array_combine($this->importFields, $extender);
@@ -175,9 +175,9 @@ class ModelModuleCsvImport extends Model {
 		$product = array_merge($product, array('product_description' => $this->model_catalog_product->getProductDescriptions($productId)));
 		
 		// Rewrite description fields from import for current language
-		foreach ($product['product_description'][$language_id] as $key => $value) {
+		foreach ($product['product_description'][$languageId] as $key => $value) {
 			if (isset($this->importFields[$key])) {
-				$product['product_description'][$language_id][$key] = $this->importFields[$key];
+				$product['product_description'][$languageId][$key] = $this->importFields[$key];
 			}
 		}
 		
@@ -243,7 +243,7 @@ class ModelModuleCsvImport extends Model {
 				'LEFT JOIN ' . DB_PREFIX . 'category_description cd1 ON (cp.path_id = cd1.category_id AND cp.category_id != cp.path_id) ' .
 				'WHERE cp.category_id = c.category_id ' .
 				'GROUP BY cp.category_id ' .
-			'), cd2.' . $nameField . '))) LIKE \'' . $categoryPath . '\'';
+			'), cd2.' . $nameField . '))) LIKE \'' . $categoryPath . '\''
 		);
 		return !empty($query->rows) ? $query->rows[0]['category_id'] : false;
 	}

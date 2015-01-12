@@ -479,10 +479,6 @@ class ControllerModuleCsvImport extends Controller {
 	 */
 	protected function import($cron = false) 
 	{
-
-		$start_memory_usage = memory_get_usage();
-		$start_time = microtime(true); 
-		
 		$this->load->model('catalog/product');
 		$this->load->model('catalog/category');
 		$this->load->model('module/csv_import');
@@ -574,8 +570,11 @@ class ControllerModuleCsvImport extends Controller {
 		set_time_limit(0);
 		$this->cache->delete('product');
 		
+		$start_memory_usage = memory_get_usage();
+		$start_time = microtime(true); 
+		
 		// Import
-		while (($item = $this->model_module_csv_import->getItem() !== false) {
+		while (($item = $this->model_module_csv_import->getItem() !== false)) {
 			// Skip empty CSV lines
 			if (!$item) {
 				continue;
@@ -619,6 +618,11 @@ class ControllerModuleCsvImport extends Controller {
 			$product = null;
 		}
 		
+		$end_time = microtime(true);
+		$end_memory_usage = memory_get_usage();
+		$total_memory_usage = number_format(($end_memory_usage - $start_memory_usage)/1024, 0, '.', ' ');
+		$execution_time = round(($end_time-$start_time),5);
+		
 		// Unlock & close file handle
 		if (!flock($handle, LOCK_UN)) {
 			$this->log->write('Import warring: Can\'t unlock file '.DIR_DOWNLOAD.'import/'.$file );
@@ -626,12 +630,7 @@ class ControllerModuleCsvImport extends Controller {
 		fclose($handle);
 		if ($isZip) {
 			unlink(DIR_DOWNLOAD.'import/'. $file);
-		}
-		
-		$end_time = microtime(true);
-		$end_memory_usage = memory_get_usage();
-		$total_memory_usage = number_format(($end_memory_usage - $start_memory_usage)/1024, 0, '.', ' ');
-		$execution_time = round(($end_time-$start_time),5);
+		}		
 		
 		if(function_exists('memory_get_peak_usage')){
 			$get_memory_peak_usage = number_format(memory_get_peak_usage()/1024, 0, '.', ' ');
