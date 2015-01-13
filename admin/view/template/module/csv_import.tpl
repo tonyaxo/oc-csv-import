@@ -230,6 +230,12 @@
 						<input type="text" name="import_image_dir" id="import_image_dir" size="50" value="<?= $import_image_dir ?>" />
 					  </td>
 					</tr>
+					<tr>
+					  <td><?php echo $entry_image_template ?></td>
+					  <td>
+						<input type="text" name="import_image_template" id="import_image_template" size="50" value="<?= $import_image_template ?>" />
+					  </td>
+					</tr>
 				</table>			
 			</div>
 		  </td>

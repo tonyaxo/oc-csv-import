@@ -157,6 +157,7 @@ class ControllerModuleCsvImport extends Controller {
 				'entry_create_category',
 				
 				'entry_image_dir',
+				'entry_image_template',
 				
 				'entry_skip_first',
 				'entry_csv_delimiter',
@@ -182,6 +183,7 @@ class ControllerModuleCsvImport extends Controller {
 				'import_delimiter',
 				'import_enclosure',
 				'import_image_dir',
+				'import_image_template',
 				'csv_import_create_category',
 				
 		);
@@ -568,6 +570,13 @@ class ControllerModuleCsvImport extends Controller {
 		));
 		
 		$this->model_module_csv_import->importFields = $importFields;
+		
+		$imageTpl = trim($this->config->get('import_image_template'));
+		if (!empty($imageTpl)) {
+			$this->model_module_csv_import->prepareImages($imageTpl);
+		}
+		
+		$this->model_module_csv_import->categoryKey = $this->config->get('category_key');
 		
 		// Set CSV file handle for model
 		if (!$this->model_module_csv_import->setHandle($handle)) {
