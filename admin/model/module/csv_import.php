@@ -14,36 +14,7 @@ class ModelModuleCsvImport extends Model {
 	protected $itemsWarning = null;
 	protected $itemsExclude = null;
 	
-	protected $importFields = array();
-	
-	private $_baseFields = array(
-		'model' => '',
-		'sku' => '',
-		'upc' => '',
-		'ean' => '',
-		'jan' => '',
-		'isbn' => '',
-		'mpn' => '',
-		'location' => '',
-		'price' => 0,
-		'tax_class_id' => 0,
-		'quantity' => 1,
-		'minimum' => 1,
-		'subtract' => 0,
-		'stock_status_id' => self::DEFAULT_STOCK_STATUS_ID,
-		'shipping' => 1,
-		'date_available' => '',
-		'length' => 0,
-		'width' => 0,
-		'height' => 0,
-		'length_class_id' => 1,
-		'weight' => 0,
-		'weight_class_id' => 1,
-		'status' => 1,
-		'sort_order' => 1,
-		'manufacturer_id' => 0,
-		'points' => 0,	
-	);	
+	public $importFields = array();
 	
 	private $_handle = null;
 	private $_cron = false;
@@ -55,6 +26,7 @@ class ModelModuleCsvImport extends Model {
 	private $error = array();
 	// TODO get LAST ERROR
 	
+	public $manufacturers =  array();
 	
 	/*
 	 * Execute import via cron tab task.
@@ -102,34 +74,35 @@ class ModelModuleCsvImport extends Model {
 	 * @param array  $values the castom fill values of product
 	 * @return product array.
 	 */
-	public function getBaseProduct($values = array()) 
+	public function getBaseProduct($values = array(), $includeDescription = true, $languageId = null) 
 	{	
-		$baseProduct = array();
+		$baseProduct = $this->getTableFields('product');
+		unset($baseProduct['product_id']);
 		
-		foreach ($this->_baseFields as $field => $default) {
-			$baseProduct[$field] = isset($values[$field]) ? $values[$field] : $default;
+		foreach ($values as $field => $value) {
+			if (array_key_exists($field, $baseProduct)) {
+				$baseProduct[$field] = $value;
+			}
 		}
+		
+		if ($includeDescription) {
+			$baseProductDescription = $this->getTableFields('product_description');
+			unset($baseProductDescription['product_id']);
+			
+			foreach ($values as $field => $value) {
+				if (array_key_exists($field, $baseProductDescription)) {
+					$baseProductDescription[$field] = $value;
+				}
+			}
+		}
+		
+		if ($languageId == null) {
+			$languageId = $this->config->get('config_language_id');
+		}
+		$baseProduct['product_description'] = array();
+		$baseProduct['product_description'][$languageId] = $baseProductDescription;
+		
 		return $baseProduct;	
-	}
-	
-	/*
-	 * Return product fields for creation
-	 * 
-	 * @return array 
-	 */
-	public function getBaseFields() 
-	{
-		return $this->_baseFields;
-	}
-	
-	/*
-	 * Set new base fields for product
-	 * 
-	 * @param array the new field=>defVal fields array 
-	 */
-	public function setBaseFields($baseFields) 
-	{
-		$this->_baseFields = $baseFields;
 	}
 	
 	/*
@@ -146,7 +119,7 @@ class ModelModuleCsvImport extends Model {
 		if ($fields[0] === null) {
 			return array();
 		}
-		return $fields;
+		return array_diff($fields, array(''));
 	}
 	
 	/*
@@ -155,36 +128,45 @@ class ModelModuleCsvImport extends Model {
 	 * @param array $product the array returns $catalog_model_product->getProduct($product_id)
 	 * @param array $extender fields returned from CSV file
 	 */
-	protected function extendProduct($product, $extender) 
+	public function extendProduct($product, $extender) 
 	{
 		$this->load->model('catalog/product');
 		$this->load->model('catalog/category');
-		$this->load->model('localisation/language');
 		
 		$languageId = $this->config->get('config_language_id');		
 		$productId = $product['product_id'];
 		
-		if (count($extender) != count($this->importFields)) {
-			return false;
-		}
-		$fields = array_combine($this->importFields, $extender);
-		
 		/* Update description fields without condition */
 		
-		// Get current description fields
-		$product = array_merge($product, array('product_description' => $this->model_catalog_product->getProductDescriptions($productId)));
+		// Move description fields in sub array	
+		$descriptionFields = $this->getTableFields('product_description');
+		unset($descriptionFields['product_id']);		
 		
-		// Rewrite description fields from import for current language
-		foreach ($product['product_description'][$languageId] as $key => $value) {
-			if (isset($this->importFields[$key])) {
-				$product['product_description'][$languageId][$key] = $this->importFields[$key];
+		$product['product_description'] = array(
+			$languageId => array(),
+		);
+		foreach ($descriptionFields as $key => $value) {
+			if (isset($product[$key])) {
+				$product['product_description'][$languageId][$key] = $product[$key];
+				unset($product[$key]);
 			}
 		}
 		
-		// Category processing
-		if (isset($this->importFields['category_id']) && !empty($this->importFields['category_id'])) {
-			$this->processCategory($this->importFields['category_id']);
+		// Update manufacturer
+		if (isset($extender['manufacturer_id'])) {
+			$product['manufacturer_id'] = $this->addManufacturer($extender['manufacturer_id']);
 		}
+		
+		// Update SEO url
+		if (isset($extender['keyword'])) {
+			$product['keyword'] = $extender['keyword'];
+		}
+		// TODO autogenerated keyword
+		
+		// Category processing
+		// if (isset($this->importFields['category_id']) && !empty($this->importFields['category_id'])) {
+			// $this->processCategory($this->importFields['category_id']);
+		// }
 		
 		//$product = array_merge($product, array('product_category' => $this->model_catalog_product->getProductCategories($productId)));		
 		//$product = array_merge($product, array('product_image' => $this->model_catalog_product->getProductImages($productId)));
@@ -202,6 +184,38 @@ class ModelModuleCsvImport extends Model {
 	
 		return $product;
 	}	
+	
+	/*
+	 * Function add new manufacturer if not exists 
+	 * 
+	 * @param integer|string $manufacturerId new manufacturer Name or ID
+	 * @return integer manufacturer ID
+	 */
+	protected function addManufacturer($manufacturerId)
+	{
+		$this->load->model('catalog/manufacturer');
+		
+		if (!is_int($manufacturerId)) {
+			$result = array_search($manufacturerId, $this->manufacturers);
+			
+			if ($result !== false) {
+				return $result;
+			}
+			
+			$this->model_catalog_manufacturer->addManufacturer(array(
+				'name' => $manufacturerId,
+				'sort_order' => 0
+			));
+			$result = $this->db->getLastId();	
+			$this->manufacturers[$result] = $manufacturerId;
+			
+			return $result;
+		}
+		if (!isset($manufacturers[$manufacturerId])) {
+			return false;
+		} 
+		return $manufacturerId;
+	}
 	
 	/*
 	 * Process category from CSV
@@ -283,20 +297,18 @@ class ModelModuleCsvImport extends Model {
 	 * This function get fields of product table from db.
 	 *
 	 */
-	public function getProductFieds() {
-		$result = $fields = array();
-	
-		$query = $this->db->query('DESCRIBE '. DB_PREFIX . 'product');
+	public function getTableFields($tableName) {
+		
+		$result = array();  
+		$fields = array();
+		
+		$query = $this->db->query('DESCRIBE '. DB_PREFIX . $tableName);
 		$result = $query->rows;
 		
-		$query = $this->db->query('DESCRIBE '. DB_PREFIX . 'product_description');
-		$result = array_merge($result, $query->rows);
-		
 		foreach ($result as $row) {
-			if ($row['Field'] == 'product_id') { continue; }
-			$field = $row['Field'];
-			$fields[$field] = $field;
-		}
+			$fields[$row['Field']] = $row['Default'];
+		}		
+		
 		return $fields;
 	}
 	
@@ -442,7 +454,7 @@ class ModelModuleCsvImport extends Model {
 	 */
 	public function findProductBy($key, $value) 
 	{
-		$query = $this->db->query("SELECT DISTINCT * FROM " . DB_PREFIX . "product p LEFT JOIN " . DB_PREFIX . "product_description pd ON (p.product_id = pd.product_id) WHERE p." . $key. " = '" . $value . "' AND pd.language_id = '" . (int)$this->config->get('config_language_id') . "'");
+		$query = $this->db->query("SELECT DISTINCT * FROM " . DB_PREFIX . "product p WHERE p." . $key . " = '" . $value . "'");
 				
 		return $query->row;
 	}

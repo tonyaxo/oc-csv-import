@@ -70,11 +70,13 @@ $_['entry_skip_first']   		= 'Пропустить первую строку';
 $_['entry_csv_delimiter']   	= 'Разделитель полей';
 $_['entry_csv_enclosure']   	= 'Ограничитель полей';
 $_['entry_create_category']   	= 'Создавать категории: <span class="help">Создавать категории если они не существуют</span>';
+$_['entry_image_dir']   		= 'Директория с загруженными файлами изображений: <span class="help">Изображения должны быть уже загружены</span>';
 
 // Tabs
 $_['tab_general']   			= 'Общее';
 $_['tab_products']   			= 'Продукты';
 $_['tab_categories']   			= 'Категории';
+$_['tab_image']   				= 'Изображения';
 
 // Button
 $_['button_add_field']   		= 'Добавить поля';

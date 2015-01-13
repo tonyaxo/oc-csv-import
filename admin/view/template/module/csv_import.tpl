@@ -78,6 +78,7 @@
 				<a href="#tab-basic"><?php echo $tab_general; ?></a>
 				<a href="#tab-product"><?php echo $tab_products; ?></a>
 				<a href="#tab-category"><?php echo $tab_categories; ?></a>
+				<a href="#tab-image"><?php echo $tab_image; ?></a>
 			</div>
 			<div id="tab-basic">
 				<table class="form">
@@ -217,6 +218,16 @@
 								<?php } ?>
 							<?php } ?>
 						</select>
+					  </td>
+					</tr>
+				</table>			
+			</div>
+			<div id="tab-image">
+				<table class="form">
+					<tr>
+					  <td><?php echo $entry_image_dir ?></td>
+					  <td>
+						<input type="text" name="import_image_dir" id="import_image_dir" size="50" value="<?= $import_image_dir ?>" />
 					  </td>
 					</tr>
 				</table>			

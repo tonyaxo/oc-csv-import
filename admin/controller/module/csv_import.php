@@ -142,6 +142,7 @@ class ControllerModuleCsvImport extends Controller {
 				'tab_general',
 				'tab_products',
 				'tab_categories',
+				'tab_image',
 
 				'entry_import_file',
 				'entry_email_report',
@@ -154,6 +155,8 @@ class ControllerModuleCsvImport extends Controller {
 				'entry_if_exists',
 				'entry_if_not_exists',
 				'entry_create_category',
+				
+				'entry_image_dir',
 				
 				'entry_skip_first',
 				'entry_csv_delimiter',
@@ -178,6 +181,7 @@ class ControllerModuleCsvImport extends Controller {
 				'import_skip_first',
 				'import_delimiter',
 				'import_enclosure',
+				'import_image_dir',
 				'csv_import_create_category',
 				
 		);
@@ -293,7 +297,10 @@ class ControllerModuleCsvImport extends Controller {
 		$this->load->model('module/csv_import');
 
 		$importKeys = array();
-		$product_fields = $this->model_module_csv_import->getProductFieds();
+		$product_fields = array_merge(
+			$this->model_module_csv_import->getTableFields('product'),
+			$this->model_module_csv_import->getTableFields('product_description')
+		);
 
 		$product_fields['category_id'] = 'category_id';
 		$product_fields['option'] = 'option';
@@ -477,11 +484,20 @@ class ControllerModuleCsvImport extends Controller {
 	 * This function make import from file to store
 	 * @param cron - true/false indicate that module run on cron
 	 */
-	protected function import($cron = false) 
+	public function import($cron = false) 
 	{
 		$this->load->model('catalog/product');
 		$this->load->model('catalog/category');
 		$this->load->model('module/csv_import');
+		$this->load->model('localisation/language');
+		
+		// Load config
+		$file = ($cron) ? self::CRON_IMPORT_FILENAME : $this->config->get('csv_import_file');
+		$isZip = (strtolower(pathinfo($file, PATHINFO_EXTENSION)) == 'zip');
+		$fileName = pathinfo($file, PATHINFO_FILENAME);
+		
+		$importFields = $this->config->get('csv_import_fields');
+		$importKey = $this->config->get('import_key');
 		
 		// Processing Zip file
 		if ($isZip) {
@@ -551,6 +567,8 @@ class ControllerModuleCsvImport extends Controller {
 			'enclosure' => html_entity_decode($this->config->get('import_enclosure')),
 		));
 		
+		$this->model_module_csv_import->importFields = $importFields;
+		
 		// Set CSV file handle for model
 		if (!$this->model_module_csv_import->setHandle($handle)) {
 			$this->error['warning'] = 'Invalid CSV file handle';
@@ -573,12 +591,26 @@ class ControllerModuleCsvImport extends Controller {
 		$start_memory_usage = memory_get_usage();
 		$start_time = microtime(true); 
 		
+		// Get all manufacturers
+		if (isset($this->model_module_csv_import->importFields['manufacturrer_id'])) {
+			$this->load->model('catalog/manufacturer');
+			$manufacturers = $this->model_catalog_manufacturer->getManufacturers();
+		
+			foreach($manufacturers as $item) {
+				$this->model_module_csv_import->manufacturers[$item['manufacturer_id']] = $item['name'];
+			}
+		}
+		
 		// Import
-		while (($item = $this->model_module_csv_import->getItem() !== false)) {
+		while (($item = $this->model_module_csv_import->getItem()) !== false) {
 			// Skip empty CSV lines
 			if (!$item) {
 				continue;
 			}
+			
+			// TODO !----------- trigger afterGetCsv -----------!
+			
+			$item = array_combine($this->model_module_csv_import->importFields, $item);
 			
 			// Check import key in item data
 			if (!isset($item[$importKey]) || empty($item[$importKey])) {
@@ -589,9 +621,17 @@ class ControllerModuleCsvImport extends Controller {
 			// Try to find product by import key
 			$result = $this->model_module_csv_import->findProductBy($importKey, $item[$importKey]);
 			
+			$productId = null;
 			if (empty($result)) {
 				// Initialize new new base product by CSV values
 				$baseProduct = $this->model_module_csv_import->getBaseProduct($item);
+				
+				// Save product description
+				$productDescription = array();
+				if (array_key_exists('product_description', $baseProduct)) {
+					$productDescription = $baseProduct['product_description'];
+					unset($baseProduct['product_description']);
+				}
 				
 				// TODO !----------- trigger beforeAdd -----------!
 				
@@ -599,6 +639,12 @@ class ControllerModuleCsvImport extends Controller {
 				// IMPORTANT $baseProduct must contain only base fields
 				// Get new product Id
 				$productId = $this->db->getLastId();
+				
+				// Update product with description
+				$baseProduct['product_description'] = $productDescription;
+				$this->model_catalog_product->editProduct($productId, $baseProduct);
+				$productDescription = null;
+				
 			} else {
 				// Get existing product Id
 				$productId = $result['product_id'];
@@ -609,7 +655,8 @@ class ControllerModuleCsvImport extends Controller {
 			
 			/* Update additional product parameters if it exist in import fields */			
 			$product = $this->model_module_csv_import->extendProduct($product, $item);
-			
+			$item = null;
+
 			// TODO !----------- trigger beforeUpdate -------------!
 			
 			// Update product data from CSV
