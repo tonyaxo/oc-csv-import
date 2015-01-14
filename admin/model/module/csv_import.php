@@ -28,12 +28,50 @@ class ModelModuleCsvImport extends Model {
 	
 	public $manufacturers =  array();
 	
-	protected $imageNameTpl;
+	protected $imageFileTpl;
 	
 	protected $imageTplPlaceholders = array();
 	
 	protected $categoryDelimiter;
+	
 	protected $categoryKey;
+	
+	protected $productStatus;
+	
+	protected $categoryStatus;
+	
+	private $_baseProduct = array();
+	
+	/*
+	 * Execute import via cron tab task.
+	 *
+	 * @param boolean $cron whether execute import with cron
+	 */
+	public function init($config = array())
+	{				
+		if (isset($config['categoryKey'])) {
+			$this->categoryKey = $config['categoryKey'];
+		} 
+		if (isset($config['cronTask'])) {
+			$this->setCron($config['cronTask']);
+		} 
+		if (isset($config['csvOptions'])) {
+			$this->setCsvOptions($config['csvOptions']);
+		} 
+		if (isset($config['importFields'])) {
+			$this->importFields = $config['importFields']);
+		} 
+		if (isset($config['productStatus'])) {
+			$this->productStatus = $config['productStatus']);
+		} 
+		if (isset($config['categoryStatus'])) {
+			$this->categoryStatus = $config['categoryStatus']);
+		} 
+		if (isset($config['imageFileTpl'])) {
+			$this->prepareImages($config['imageFileTpl']);
+		} 
+		$this->_baseProduct = $this->getBaseProduct();
+	}
 	
 	/*
 	 * Execute import via cron tab task.
@@ -83,7 +121,7 @@ class ModelModuleCsvImport extends Model {
 	 */
 	public function prepareImages($imageNameTpl)
 	{				
-		$this->imageNameTpl = $imageNameTpl;
+		$this->imageFileTpl = $imageNameTpl;
 		$placeholders = $this->getTableFields('product');
 		
 		foreach ($placeholders as $key => $value) {
@@ -97,27 +135,47 @@ class ModelModuleCsvImport extends Model {
 	 * @param array  $values the castom fill values of product
 	 * @return product array.
 	 */
-	public function getBaseProduct($values = array(), $includeDescription = true, $languageId = null) 
+	public function initProduct($values = array(), $includeDescription = false, $languageId = null) 
+	{	
+		$product = $this->_baseProduct;
+		foreach ($values as $key => $value) {
+			if (isset($product[$key])) {
+				$product[$key] = $value;
+			}
+		}	
+		if ($includeDescription) {
+			if ($languageId && isset($product['product_description']) && isset($product['product_description'][$languageId])) {
+				foreach ($values as $key => $value) {
+					if (isset($product['product_description'][$languageId][$key])) {
+						$product['product_description'][$languageId][$key] = $value;
+					}
+				}
+			} elseif (isset($product['product_description']) && !empty($product['product_description'])) {
+				foreach ($product['product_description'] as $languageId => $description) {
+					foreach ($values as $key => $value) {
+						if (isset($product['product_description'][$languageId][$key])) {
+							$product['product_description'][$languageId][$key] = $value;
+						}
+					}
+				}				
+			}
+		}	
+		return $product;
+	}
+	
+	/*
+	 * This function get product with base values.
+	 *
+	 * @param array  $values the castom fill values of product
+	 * @return product array.
+	 */
+	public function getBaseProduct($languageId = null) 
 	{	
 		$baseProduct = $this->getTableFields('product');
-		unset($baseProduct['product_id']);
-		
-		foreach ($values as $field => $value) {
-			if (array_key_exists($field, $baseProduct)) {
-				$baseProduct[$field] = $value;
-			}
-		}
-		
-		if ($includeDescription) {
-			$baseProductDescription = $this->getTableFields('product_description');
-			unset($baseProductDescription['product_id']);
-			
-			foreach ($values as $field => $value) {
-				if (array_key_exists($field, $baseProductDescription)) {
-					$baseProductDescription[$field] = $value;
-				}
-			}
-		}
+		unset($baseProduct['product_id']);		
+
+		$baseProductDescription = $this->getTableFields('product_description');
+		unset($baseProductDescription['product_id']);
 		
 		if ($languageId == null) {
 			$languageId = $this->config->get('config_language_id');
@@ -189,9 +247,9 @@ class ModelModuleCsvImport extends Model {
 		// Update image
 		if (isset($extender['image'])) {
 			$product['image'] = $this->addImage($extender['image']);
-		} elseif (!empty($this->imageNameTpl)) {
+		} elseif (!empty($this->imageFileTpl)) {
 			$values = array_values($product);
-			$image = str_replace($placeholders, $values, $this->imageNameTpl);
+			$image = str_replace($placeholders, $values, $this->imageFileTpl);
 			
 			$product['image'] = $this->addImage($image);
 		}
