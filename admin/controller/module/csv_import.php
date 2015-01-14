@@ -155,6 +155,8 @@ class ControllerModuleCsvImport extends Controller {
 				'entry_if_exists',
 				'entry_if_not_exists',
 				'entry_create_category',
+				'entry_category_status',
+				'entry_product_status',
 				
 				'entry_image_dir',
 				'entry_image_template',
@@ -185,6 +187,8 @@ class ControllerModuleCsvImport extends Controller {
 				'import_image_dir',
 				'import_image_template',
 				'csv_import_create_category',
+				'csv_import_product_status',
+				'csv_import_category_status',
 				
 		);
 
@@ -500,51 +504,11 @@ class ControllerModuleCsvImport extends Controller {
 		
 		$importFields = $this->config->get('csv_import_fields');
 		$importKey = $this->config->get('import_key');
+		$languageId = $this->config->get('config_language_id');
 		
 		// Processing Zip file
 		if ($isZip) {
-			if (!is_file(DIR_DOWNLOAD.'import/'. $file) || !is_readable(DIR_DOWNLOAD.'import/'. $file)) {
-				$this->error['warning'] = "no access";
-				$this->log->write('Import failed: Can\'t read file '.DIR_DOWNLOAD.'import/'. $file );
-
-				return false;
-			}
-			
-			// Unzip file entry
-			$zip = new ZipArchive;
-			$res = $zip->open(DIR_DOWNLOAD.'import/'. $file);
-			if ($res !== true) {
-				$this->error['warning'] = "cant open zip";
-				$this->log->write('Import failed: Can\'t open file (ERROR: ' . $res . ') '.DIR_DOWNLOAD.'import/'. $file );
-				
-				return false;
-			}
-			if ($zip->numFiles != 1) {
-				echo $this->error['warning'] = "too few files in archive";
-				$this->log->write('Import failed: too few files in archive '.DIR_DOWNLOAD.'import/'. $file );
-				
-				return false;
-			}
-			
-			$zipFile = $file;
-			
-			// Get single file
-			$file = $zip->getNameIndex(0);
-			if ($file == false) {
-				$this->error['warning'] = 'zip no files with index 0';
-				$this->log->write('Import failed: no files with index 0 in '.DIR_DOWNLOAD.'import/'. $zipFile );
-				
-				return false;
-			}
-			
-			if (!$zip->extractTo(DIR_DOWNLOAD.'import/', array($file))) {
-				$this->error['warning'] = "cant extract from zip";
-				$this->log->write('Import failed: Can\'t extract file '.DIR_DOWNLOAD.'import/'. $file );
-				
-				return false;
-			}
-			chmod(DIR_DOWNLOAD.'import/'. $file, 0777);
-			$zip->close();		
+			$file = $this->unzip($file);		
 		}
 		
 		if (!is_file(DIR_DOWNLOAD.'import/'.$file) || !is_readable(DIR_DOWNLOAD.'import/'.$file)) {
@@ -554,29 +518,25 @@ class ControllerModuleCsvImport extends Controller {
 			return false;
 		}
 
-		if (($handle = fopen(DIR_DOWNLOAD.'import/'.$file, "r")) === FALSE) {
+		if (($handle = fopen(DIR_DOWNLOAD.'import/'.$file, "r")) === false) {
 			$this->error['warning'] = "open file error";
 			$this->log->write('Import failed: Can\'t open file '.DIR_DOWNLOAD.'import/'.$file );
 
 			return false;
 		}
-		
-		// Set cron flag
-		$this->model_module_csv_import->setCron($cron);
-		
-		$this->model_module_csv_import->setCsvOptions(array(
-			'delimiter' => html_entity_decode($this->config->get('import_delimiter')),
-			'enclosure' => html_entity_decode($this->config->get('import_enclosure')),
+				
+		$this->model_module_csv_import->init(array(
+			'categoryKey' => $this->config->get('category_key'),
+			'cronTask' => $cron,
+			'csvOptions' => array(
+				'delimiter' => html_entity_decode($this->config->get('import_delimiter')),
+				'enclosure' => html_entity_decode($this->config->get('import_enclosure')),
+			),
+			'importFields' => $this->config->get('csv_import_fields'),
+			'productStatus' => $this->config->get('csv_import_product_status'),
+			'categoryStatus' => $this->config->get('csv_import_category_status'),
+			'imageFileTpl' => $this->config->get('import_image_template'),			
 		));
-		
-		$this->model_module_csv_import->importFields = $importFields;
-		
-		$imageTpl = trim($this->config->get('import_image_template'));
-		if (!empty($imageTpl)) {
-			$this->model_module_csv_import->prepareImages($imageTpl);
-		}
-		
-		$this->model_module_csv_import->categoryKey = $this->config->get('category_key');
 		
 		// Set CSV file handle for model
 		if (!$this->model_module_csv_import->setHandle($handle)) {
@@ -633,7 +593,7 @@ class ControllerModuleCsvImport extends Controller {
 			$productId = null;
 			if (empty($result)) {
 				// Initialize new new base product by CSV values
-				$baseProduct = $this->model_module_csv_import->getBaseProduct($item);
+				$baseProduct = $this->model_module_csv_import->initProduct($item, true, $languageId);
 				
 				// Save product description
 				$productDescription = array();
@@ -652,8 +612,9 @@ class ControllerModuleCsvImport extends Controller {
 				// Update product with description
 				$baseProduct['product_description'] = $productDescription;
 				$this->model_catalog_product->editProduct($productId, $baseProduct);
-				$productDescription = null;
 				
+				$productDescription = null;
+				$baseProduct = null;
 			} else {
 				// Get existing product Id
 				$productId = $result['product_id'];
@@ -752,6 +713,58 @@ class ControllerModuleCsvImport extends Controller {
 		$this->log->write('Import complete: '."\n\t\t".'-> success: '.count($this->products_changed)."\n\t\t".'-> exclude: '.count($this->products_excluded));
 
 		return true;
+	}
+	
+	/*
+	 * This function extract single file from zip and return file name
+	 * @param string $file the zip archive filename
+	 */
+	protected function unzip($file)
+	{
+
+		if (!is_file(DIR_DOWNLOAD.'import/'. $file) || !is_readable(DIR_DOWNLOAD.'import/'. $file)) {
+			$this->error['warning'] = "no access";
+			$this->log->write('Import failed: Can\'t read file '.DIR_DOWNLOAD.'import/'. $file );
+
+			return false;
+		}
+		
+		$zip = new ZipArchive;
+		$res = $zip->open(DIR_DOWNLOAD.'import/'. $file);
+		if ($res !== true) {
+			$this->error['warning'] = "cant open zip";
+			$this->log->write('Import failed: Can\'t open file (ERROR: ' . $res . ') '.DIR_DOWNLOAD.'import/'. $file );
+			
+			return false;
+		}
+		if ($zip->numFiles != 1) {
+			echo $this->error['warning'] = "too few files in archive";
+			$this->log->write('Import failed: too few files in archive '.DIR_DOWNLOAD.'import/'. $file );
+			
+			return false;
+		}
+		
+		$zipFile = $file;
+		
+		// Get single file
+		$file = $zip->getNameIndex(0);
+		if ($file == false) {
+			$this->error['warning'] = 'zip no files with index 0';
+			$this->log->write('Import failed: no files with index 0 in '.DIR_DOWNLOAD.'import/'. $zipFile );
+			
+			return false;
+		}
+		
+		if (!$zip->extractTo(DIR_DOWNLOAD.'import/', array($file))) {
+			$this->error['warning'] = "cant extract from zip";
+			$this->log->write('Import failed: Can\'t extract file '.DIR_DOWNLOAD.'import/'. $file );
+			
+			return false;
+		}
+		chmod(DIR_DOWNLOAD.'import/'. $file, 0777);
+		$zip->close();	
+
+		return $file;
 	}
 
 	public function install() {
