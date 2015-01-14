@@ -166,6 +166,18 @@
 						</select>
 					  </td>
 					</tr>
+					<tr>
+					  <td><?php echo $entry_product_status ?></td>
+					  <td><select name="csv_import_product_status">
+						  <?php if ($csv_import_product_status) { ?>
+						  <option value="1" selected="selected"><?php echo $text_enabled; ?></option>
+						  <option value="0"><?php echo $text_disabled; ?></option>
+						  <?php } else { ?>
+						  <option value="1"><?php echo $text_enabled; ?></option>
+						  <option value="0" selected="selected"><?php echo $text_disabled; ?></option>
+						  <?php } ?>
+						</select></td>
+					</tr>
 				</table>
 			</div>
 			<div id="tab-category">
@@ -219,6 +231,18 @@
 							<?php } ?>
 						</select>
 					  </td>
+					</tr>
+					<tr>
+					  <td><?php echo $entry_category_status ?></td>
+					  <td><select name="csv_import_category_status">
+						  <?php if ($csv_import_category_status) { ?>
+						  <option value="1" selected="selected"><?php echo $text_enabled; ?></option>
+						  <option value="0"><?php echo $text_disabled; ?></option>
+						  <?php } else { ?>
+						  <option value="1"><?php echo $text_enabled; ?></option>
+						  <option value="0" selected="selected"><?php echo $text_disabled; ?></option>
+						  <?php } ?>
+						</select></td>
 					</tr>
 				</table>			
 			</div>
