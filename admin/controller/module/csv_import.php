@@ -535,7 +535,9 @@ class ControllerModuleCsvImport extends Controller {
 			'importFields' => $this->config->get('csv_import_fields'),
 			'productStatus' => $this->config->get('csv_import_product_status'),
 			'categoryStatus' => $this->config->get('csv_import_category_status'),
-			'imageFileTpl' => $this->config->get('import_image_template'),			
+			'categoryCreate' => $this->config->get('csv_import_create_category'),
+			'imageFileTpl' => $this->config->get('import_image_template'),	
+			'languageId' => $languageId,
 		));
 		
 		// Set CSV file handle for model
@@ -561,13 +563,14 @@ class ControllerModuleCsvImport extends Controller {
 		$start_time = microtime(true); 
 		
 		// Get all manufacturers
-		if (isset($this->model_module_csv_import->importFields['manufacturrer_id'])) {
+		if (in_array('manufacturer_id', $this->model_module_csv_import->importFields)) {
 			$this->load->model('catalog/manufacturer');
 			$manufacturers = $this->model_catalog_manufacturer->getManufacturers();
 		
 			foreach($manufacturers as $item) {
 				$this->model_module_csv_import->manufacturers[$item['manufacturer_id']] = $item['name'];
 			}
+			unset($manufacturers);
 		}
 		
 		// Import
