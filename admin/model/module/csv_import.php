@@ -42,6 +42,8 @@ class ModelModuleCsvImport extends Model {
 	
 	protected $categoryCreate;
 	
+	protected $addToSubCategories;
+	
 	protected $languageId;
 	
 	private $_baseProduct = array();
@@ -55,31 +57,37 @@ class ModelModuleCsvImport extends Model {
 	{				
 		if (isset($config['languageId'])) {
 			$this->languageId = $config['languageId'];
-		} 
+		}
 		if (isset($config['categoryKey'])) {
 			$this->categoryKey = $config['categoryKey'];
-		} 
+		}
 		if (isset($config['cronTask'])) {
 			$this->setCron($config['cronTask']);
-		} 
+		}
 		if (isset($config['csvOptions'])) {
 			$this->setCsvOptions($config['csvOptions']);
-		} 
+		}
 		if (isset($config['importFields'])) {
 			$this->importFields = $config['importFields'];
-		} 
+		}
 		if (isset($config['productStatus'])) {
 			$this->productStatus = $config['productStatus'];
-		} 
+		}
 		if (isset($config['categoryStatus'])) {
 			$this->categoryStatus = $config['categoryStatus'];
-		} 
+		}
 		if (isset($config['categoryCreate'])) {
 			$this->categoryCreate = $config['categoryCreate'];
-		} 
+		}
+		if (isset($config['categoryDelimiter'])) {
+			$this->categoryDelimiter = $config['categoryDelimiter'];
+		}
+		if (isset($config['addToSubCategories'])) {
+			$this->addToSubCategories = $config['addToSubCategories'];
+		}
 		if (isset($config['imageFileTpl'])) {
 			$this->prepareImages($config['imageFileTpl']);
-		} 
+		}
 		$this->_baseProduct = $this->getBaseProduct();
 	}
 	
@@ -268,7 +276,7 @@ class ModelModuleCsvImport extends Model {
 		
 		// Category processing
 		if (array_key_exists('category_id', $extender)) {
-			$product['category_id'] = $this->addCategory($extender['category_id']);
+			$product['product_category'] = $this->addCategory($extender['category_id']);
 		}
 		
 		//$product = array_merge($product, array('product_category' => $this->model_catalog_product->getProductCategories($productId)));		
@@ -346,6 +354,8 @@ class ModelModuleCsvImport extends Model {
 	{
 		$this->load->model('catalog/category');
 		
+		$result = array();
+		
 		$languageId = $languageId 
 			? $languageId
 			: $this->config->get('config_language_id');		
@@ -355,7 +365,7 @@ class ModelModuleCsvImport extends Model {
 		$categories = explode($this->categoryDelimiter, $categoryPath);
 		
 		if (empty($categories)) {
-			return $previousId;
+			return $result;
 		}	
 		
 		foreach ($categories as $category) {
@@ -394,9 +404,16 @@ class ModelModuleCsvImport extends Model {
 			} else {
 				$previousId = 0;
 			}
+			
+			if ($this->addToSubCategories) {
+				$result[] = $previousId;
+			}
 		} 
+		if (!$this->addToSubCategories) {
+			$result[] = $previousId;
+		}
 		
-		return $previousId;
+		return $result;
 	}
 	
 	/**
