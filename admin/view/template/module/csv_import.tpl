@@ -79,6 +79,7 @@
 				<a href="#tab-product"><?php echo $tab_products; ?></a>
 				<a href="#tab-category"><?php echo $tab_categories; ?></a>
 				<a href="#tab-image"><?php echo $tab_image; ?></a>
+				<a href="#tab-plugin"><?php echo $tab_plugin; ?></a>
 			</div>
 			<div id="tab-basic">
 				<table class="form">
@@ -244,6 +245,12 @@
 						  <?php } ?>
 						</select></td>
 					</tr>
+					<tr>
+					  <td><?php echo $entry_category_delimiter ?></td>
+					  <td>
+						<input type="text" name="import_category_delimiter" id="import_category_delimiter" size="2" value="<?php echo $import_category_delimiter ?>" />
+					  </td>
+					</tr>
 				</table>			
 			</div>
 			<div id="tab-image">
@@ -258,6 +265,24 @@
 					  <td><?php echo $entry_image_template ?></td>
 					  <td>
 						<input type="text" name="import_image_template" id="import_image_template" size="50" value="<?= $import_image_template ?>" />
+					  </td>
+					</tr>
+				</table>			
+			</div>
+			<div id="tab-plugin">
+				<table class="form">
+					<tr>
+					  <td><?php echo $entry_use_plugin ?></td>
+					  <td>
+						<select name="csv_import_plugin" id="csv_import_plugin">
+							<?php foreach ($plugins as $plugin) { ?>
+								<?php if ($plugin->getClassName() == $csv_import_plugin) { ?>
+									<option value="<?= $plugin->getClassName() ?>" selected="selected"><?= $plugin->getName() ?></option>
+								<?php } else { ?>
+									<option value="<?= $plugin->getClassName() ?>"><?= $plugin->getName() ?></option>
+								<?php } ?>
+							<?php } ?>
+						</select>
 					  </td>
 					</tr>
 				</table>			
