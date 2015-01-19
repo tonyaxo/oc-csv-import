@@ -143,6 +143,7 @@ class ControllerModuleCsvImport extends Controller {
 				'tab_products',
 				'tab_categories',
 				'tab_image',
+				'tab_plugin',
 
 				'entry_import_file',
 				'entry_email_report',
@@ -156,13 +157,18 @@ class ControllerModuleCsvImport extends Controller {
 				'entry_if_not_exists',
 				'entry_create_category',
 				'entry_category_status',
+				'entry_category_delimiter',
 				'entry_product_status',
 				
 				'entry_image_dir',
 				'entry_image_template',
 				
+				'entry_use_plugin',
+				
 				'entry_skip_first',
 				'entry_csv_delimiter',
+				'entry_csv_enclosure',
+				
 				'entry_csv_enclosure',
 
 				'warring_category_not_found',
@@ -189,7 +195,8 @@ class ControllerModuleCsvImport extends Controller {
 				'csv_import_create_category',
 				'csv_import_product_status',
 				'csv_import_category_status',
-				
+				'csv_import_plugin',
+				'import_category_delimiter',
 		);
 
 		foreach ($config_data as $conf) {
@@ -332,6 +339,15 @@ class ControllerModuleCsvImport extends Controller {
 		}
 		$this->data['category_fields'] = $category_fields;
 		$this->data['category_keys'] = $category_keys;
+		
+		$pluginList = $this->getPlugins();
+		if ($this->loadPlugins($pluginList)) {
+			foreach ($pluginList as $class => $file) {
+				$this->data['plugins'][] = new $class();
+			}
+		} else {
+			$this->data['plugins'] = array();
+		}
 
 		$this->load->model('design/layout');
 
@@ -506,6 +522,8 @@ class ControllerModuleCsvImport extends Controller {
 		$importKey = $this->config->get('import_key');
 		$languageId = $this->config->get('config_language_id');
 		
+		$pluginName = $this->config->get('csv_import_plugin');
+		
 		// Processing Zip file
 		if ($isZip) {
 			$file = $this->unzip($file);		
@@ -537,6 +555,8 @@ class ControllerModuleCsvImport extends Controller {
 			'categoryStatus' => $this->config->get('csv_import_category_status'),
 			'categoryCreate' => $this->config->get('csv_import_create_category'),
 			'imageFileTpl' => $this->config->get('import_image_template'),	
+			'categoryDelimiter' => html_entity_decode($this->config->get('import_category_delimiter')),	
+			'addToSubCategories' => $this->config->get('csv_import_add_to_parent'),	
 			'languageId' => $languageId,
 		));
 		
@@ -556,6 +576,14 @@ class ControllerModuleCsvImport extends Controller {
 			return false;
 		}
 		
+		$pluginList = $this->getPlugins();		
+		$plugin = null;
+		if (array_key_exists($pluginName, $pluginList)) {
+			if ($this->loadPlugins(array($pluginName => $pluginList[$pluginName]))) {
+				$plugin = new $pluginName();
+			}
+		}
+			
 		set_time_limit(0);
 		$this->cache->delete('product');
 		
@@ -580,7 +608,10 @@ class ControllerModuleCsvImport extends Controller {
 				continue;
 			}
 			
-			// TODO !----------- trigger afterGetCsv -----------!
+			// !----------- trigger afterGetCsv -----------!
+			if ($plugin) {
+				$item = $plugin->afterGetCsv($item);
+			}
 			
 			$item = array_combine($this->model_module_csv_import->importFields, $item);
 			
@@ -768,6 +799,53 @@ class ControllerModuleCsvImport extends Controller {
 		$zip->close();	
 
 		return $file;
+	}
+	
+	protected function loadPlugins($plugins = array()) 
+	{
+		$dir = DIR_APPLICATION . 'model/module/csv_import_plugins/';
+		include_once($dir . 'CsvImportPluginInterface.php');
+		
+		if (empty($plugins)) {
+			$plugins = $this->getPlugins();
+		} elseif (!is_array($plugins)) {
+			return false;
+		}
+			
+		foreach ($plugins as $class => $plugin) {
+			$path = $dir . $plugin;
+			if (file_exists($path)) {
+				include_once($path);
+				
+				$plugin = new $class();
+				if ( ! $plugin instanceof CsvImportPluginInterface) {
+					return false;
+				}
+				$plugin = null;
+			} else {
+				return false;
+			}
+		}
+		
+		return true;
+	}	
+	
+	protected function getPlugins() 
+	{
+		$result = array();
+		
+		$dir = DIR_APPLICATION . 'model/module/csv_import_plugins/';
+		if (is_dir($dir)) {
+			if ($dh = opendir($dir)) {
+				while (($file = readdir($dh)) !== false) {
+					if (preg_match('/(.+)Plugin.php$/', $file)) {
+						$result[pathinfo($file, PATHINFO_FILENAME)] = $file;
+					}
+				}
+				closedir($dh);
+			}
+		}
+		return $result;
 	}
 
 	public function install() {
