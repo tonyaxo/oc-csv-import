@@ -46,7 +46,11 @@ class ModelModuleCsvImport extends Model {
 	
 	protected $languageId;
 	
+	protected $csvSkipFirstLine;
+	
 	private $_baseProduct = array();
+	
+	private $_baseCategory = array();
 	
 	/*
 	 * Execute import via cron tab task.
@@ -82,6 +86,9 @@ class ModelModuleCsvImport extends Model {
 		if (isset($config['categoryDelimiter'])) {
 			$this->categoryDelimiter = $config['categoryDelimiter'];
 		}
+		if (isset($config['csvSkipFirstLine'])) {
+			$this->csvSkipFirstLine = $config['csvSkipFirstLine'];
+		}
 		if (isset($config['addToSubCategories'])) {
 			$this->addToSubCategories = $config['addToSubCategories'];
 		}
@@ -89,6 +96,12 @@ class ModelModuleCsvImport extends Model {
 			$this->prepareImages($config['imageFileTpl']);
 		}
 		$this->_baseProduct = $this->getBaseProduct();
+		$this->_baseCategory = $this->getBaseCategory();
+		
+		if ($this->handle && $this->csvSkipFirstLine) {
+			$this->getItem();
+			$this->csvSkipFirstLine = 0;
+		}
 	}
 	
 	/*
@@ -126,6 +139,11 @@ class ModelModuleCsvImport extends Model {
 	{				
 		if ($handle) {
 			$this->_handle = $handle;
+			
+			if ($this->csvSkipFirstLine) {
+				$this->getItem();
+				$this->csvSkipFirstLine = 0;
+			}
 			return true;
 		}
 		return false;
@@ -184,7 +202,7 @@ class ModelModuleCsvImport extends Model {
 	/*
 	 * This function get product with base values.
 	 *
-	 * @param array  $values the castom fill values of product
+	 * @param integer $languageId the language Id for description
 	 * @return product array.
 	 */
 	public function getBaseProduct($languageId = null) 
@@ -202,6 +220,29 @@ class ModelModuleCsvImport extends Model {
 		$baseProduct['product_description'][$languageId] = $baseProductDescription;
 		
 		return $baseProduct;	
+	}
+	
+	/*
+	 * This function get category with base values.
+	 *
+	 * @param integer  $languageId the language Id for description
+	 * @return product array.
+	 */
+	public function getBaseCategory($languageId = null) 
+	{	
+		$baseCategory = $this->getTableFields('category');
+		unset($baseCategory['category_id']);		
+
+		$baseCategoryDescription = $this->getTableFields('category_description');
+		unset($baseCategoryDescription['category_id']);
+		
+		if ($languageId == null) {
+			$languageId = $this->config->get('config_language_id');
+		}
+		$baseCategory['category_description'] = array();
+		$baseCategory['category_description'][$languageId] = $baseCategoryDescription;
+		
+		return $baseCategory;	
 	}
 	
 	/*
@@ -275,6 +316,13 @@ class ModelModuleCsvImport extends Model {
 			: $this->productStatus;
 		
 		// Category processing
+		if (array_key_exists('store_id', $extender)) {
+			$product['product_store'] = array($extender['store_id']);
+		} else {
+			$product['product_store'] = array(0);
+		}
+		
+		// Set store
 		if (array_key_exists('category_id', $extender)) {
 			$product['product_category'] = $this->addCategory($extender['category_id']);
 		}
@@ -378,26 +426,19 @@ class ModelModuleCsvImport extends Model {
 			if ($categoryId !== false) {
 				$previousId = $categoryId;
 			} elseif ($this->categoryCreate) {
-				$this->model_catalog_category->addCategory(array(
-					'parent_id' => $previousId,
-					'top' => ($previousId ? 0 : 1),
-					'column' => 1,
-					'sort_order' => 0,
-					'status' => $this->categoryStatus,
-					'category_description' => array(
-						$languageId => array(
-							'name' => $category,
-							'meta_keyword' => $category,
-							'meta_description' => $category,
-							'description' => $category,
-							'seo_title' => $category,
-							'seo_h1' => $category,
-							'href' => '',
-						),
-					),
-					'category_store' => array(0),
-				));
-				$previousId = $this->model_module_csv_import->getCategoryIdByPath(
+				// TODO rewrite with init category 
+				$newCategory = $this->_baseCategory;
+				$newCategory['parent_id'] = $previousId;
+				$newCategory['top'] = $previousId ? 0 : 1;
+				$newCategory['status'] = $this->categoryStatus;
+				
+				$newCategory['category_description'][$languageId]['name'] = $category;
+				
+				$newCategory['category_store'] = array(0);
+				
+				$this->model_catalog_category->addCategory($newCategory);
+				
+				$previousId = $this->getCategoryIdByPath(
 					implode($this->categoryDelimiter, $path), 
 					$this->categoryKey
 				);
