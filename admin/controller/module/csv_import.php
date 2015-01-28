@@ -18,6 +18,7 @@ class ControllerModuleCsvImport extends Controller {
 	/** @const */
 	private static $unique = array('product_id', 'model', 'sku', 'upc', 'ean',	'jan', 'isbn', 'mpn', 'keyword');	//!< unique fields
 	private static $log_file = 'csv_import.log';
+	private static $resultsFileName = 'csv_import_results.log';
 
 	/*
 	 * Entry point of module
@@ -557,6 +558,7 @@ class ControllerModuleCsvImport extends Controller {
 			'imageFileTpl' => $this->config->get('import_image_template'),	
 			'categoryDelimiter' => html_entity_decode($this->config->get('import_category_delimiter')),	
 			'addToSubCategories' => $this->config->get('csv_import_add_to_parent'),	
+			'csvSkipFirstLine' => $this->config->get('import_skip_first'),
 			'languageId' => $languageId,
 		));
 		
@@ -587,8 +589,8 @@ class ControllerModuleCsvImport extends Controller {
 		set_time_limit(0);
 		$this->cache->delete('product');
 		
-		$start_memory_usage = memory_get_usage();
-		$start_time = microtime(true); 
+		$startMemoryUsage = memory_get_usage();
+		$startTime = microtime(true); 
 		
 		// Get all manufacturers
 		if (in_array('manufacturer_id', $this->model_module_csv_import->importFields)) {
@@ -600,6 +602,12 @@ class ControllerModuleCsvImport extends Controller {
 			}
 			unset($manufacturers);
 		}
+		
+		$newProductsCnt = 0;
+		$importFailed = 0;
+		
+		$this->resultHandle = fopen(self::$resultsFileName, 'w');
+		// TODO error processing
 		
 		// Import
 		while (($item = $this->model_module_csv_import->getItem()) !== false) {
@@ -617,7 +625,10 @@ class ControllerModuleCsvImport extends Controller {
 			
 			// Check import key in item data
 			if (!isset($item[$importKey]) || empty($item[$importKey])) {
-				// TODO Mark this product as skiped
+				$importFailed++;
+				
+				$item['result'] = 'skip';
+				fwrite($this->resultHandle, json_encode($item) . PHP_EOL);
 				continue;
 			}
 			
@@ -636,32 +647,41 @@ class ControllerModuleCsvImport extends Controller {
 					unset($baseProduct['product_description']);
 				}
 				
-				// TODO !----------- trigger beforeAdd -----------!
-				
 				$this->model_catalog_product->addProduct($baseProduct);
 				// IMPORTANT $baseProduct must contain only base fields
 				// Get new product Id
 				$productId = $this->db->getLastId();
 				
-				// Update product with description
-				$baseProduct['product_description'] = $productDescription;
-				$this->model_catalog_product->editProduct($productId, $baseProduct);
+				if ($productId) {
+					$newProductsCnt++;
+					
+					$item['result'] = 'new';
+					fwrite($this->resultHandle, json_encode($item) . PHP_EOL);
+					
+					// Update product with description
+					$baseProduct['product_description'] = $productDescription;
+					$this->model_catalog_product->editProduct($productId, $baseProduct);
+				} else {
+					// TODO Add to log
+					$importFailed++;
+				}
 				
 				$productDescription = null;
 				$baseProduct = null;
 			} else {
 				// Get existing product Id
 				$productId = $result['product_id'];
+				
+				$item['result'] = 'update';
+				fwrite($this->resultHandle, json_encode($item) . PHP_EOL);
 			}
-			
+
 			// Get product data
 			$product = $this->model_catalog_product->getProduct($productId);
 			
 			/* Update additional product parameters if it exist in import fields */			
 			$product = $this->model_module_csv_import->extendProduct($product, $item);
 			$item = null;
-
-			// TODO !----------- trigger beforeUpdate -------------!
 			
 			// Update product data from CSV
 			$this->model_catalog_product->editProduct($productId, $product);
@@ -669,10 +689,13 @@ class ControllerModuleCsvImport extends Controller {
 			$product = null;
 		}
 		
-		$end_time = microtime(true);
-		$end_memory_usage = memory_get_usage();
-		$total_memory_usage = number_format(($end_memory_usage - $start_memory_usage)/1024, 0, '.', ' ');
-		$execution_time = round(($end_time-$start_time),5);
+		fclose($this->resultHandle); 
+		
+		$totalMemoryUsage = number_format((memory_get_usage() - $startMemoryUsage)/1024, 0, '.', ' ');
+		$executionTime = round((microtime(true)-$startTime),5);
+		if(function_exists('memory_get_peak_usage')){
+			$getMemoryPeakUsage = number_format(memory_get_peak_usage()/1024, 0, '.', ' ');
+		}
 		
 		// Unlock & close file handle
 		if (!flock($handle, LOCK_UN)) {
@@ -681,72 +704,75 @@ class ControllerModuleCsvImport extends Controller {
 		fclose($handle);
 		if ($isZip) {
 			unlink(DIR_DOWNLOAD.'import/'. $file);
-		}		
-		
-		if(function_exists('memory_get_peak_usage')){
-			$get_memory_peak_usage = number_format(memory_get_peak_usage()/1024, 0, '.', ' ');
-		}		
-
+		}			
 		// Email report
-		if ($import_report && $import_email) {
-
-			$temp_dir = sys_get_temp_dir();
-			$results = array (
-				'success' => $this->products_changed,
-				'warrings' => $this->products_warnings,
-				'exclude' => $this->products_excluded
-			);
-
-			$mail = new Mail();
-
-			foreach ($results as $status => $result) {
-				$filename = $temp_dir.'/'.$status.'.csv';
-				if (!touch($filename)) {
-					break;
-				}
-				if (($f = fopen($filename, 'w')) == false) {
-					break;
-				}
-				foreach ($result as $fields) {
-					fputcsv($f, $fields);
-				}
-				fclose($f);
-				$mail->addAttachment($filename);
-			}
-
-			$total = count($this->products_changed) + count($this->products_excluded);
-
-			$mail->protocol = $this->config->get('config_mail_protocol');
-			$mail->parameter = $this->config->get('config_mail_parameter');
-			$mail->hostname = $this->config->get('config_smtp_host');
-			$mail->username = $this->config->get('config_smtp_username');
-			$mail->password = $this->config->get('config_smtp_password');
-			$mail->port = $this->config->get('config_smtp_port');
-			$mail->timeout = $this->config->get('config_smtp_timeout');
-			$mail->setTo($import_email);
-	  		$mail->setFrom($this->config->get('config_email'));
-	  		$mail->setSender($this->language->get('email_sender'));
-	  		$mail->setSubject(html_entity_decode($this->language->get('email_subject'), ENT_QUOTES, 'UTF-8'));
-	  		$mail->setHtml(html_entity_decode(sprintf($this->language->get('email_text'), $total, count($this->products_changed), count($this->products_excluded), count($this->products_warnings)), ENT_QUOTES, 'UTF-8'));
-      		$mail->send();
-
-			$this->log->write('Import result sending to: '.$import_email);
+		if ($this->config->get('csv_import_report') && $this->config->get('csv_import_email')) {
+			//$this->sendEmailReport($import_email);
     	}
 		
 		if (!$cron) {
 			echo json_encode(array (
-				'success' => $this->products_changed,
-				'warnings' => $this->products_warnings,
-				'exclude' => $this->products_excluded,
-				'time' =>  $execution_time,
-				'memory_total' => $total_memory_usage,
-				'memory_peak' => $get_memory_peak_usage,
+				'success' => $newProductsCnt,
+				//'warnings' => newProductsCnt,
+				//'exclude' => $this->products_excluded,
+				'time' =>  $executionTime,
+				'memory_total' => $totalMemoryUsage,
+				'memory_peak' => $getMemoryPeakUsage,
 			));
 		}
 
-		$this->log->write('Import complete: '."\n\t\t".'-> success: '.count($this->products_changed)."\n\t\t".'-> exclude: '.count($this->products_excluded));
+		$this->log->write('Import complete: '."\n\t\t".'-> success: '.$newProductsCnt);
 
 		return true;
+	}	
+	
+	/*
+	 * This function extract single file from zip and return file name
+	 * @param string $file the zip archive filename
+	 */
+	protected function sendEmailReport($email)
+	{
+		$temp_dir = sys_get_temp_dir();
+		$results = array (
+			'success' => $newProductsCnt,
+			//'warrings' => $this->products_warnings,
+			//'exclude' => $this->products_excluded
+		);
+
+		$mail = new Mail();
+
+		// foreach ($results as $status => $result) {
+			// $filename = $temp_dir.'/'.$status.'.csv';
+			// if (!touch($filename)) {
+				// break;
+			// }
+			// if (($f = fopen($filename, 'w')) == false) {
+				// break;
+			// }
+			// foreach ($result as $fields) {
+				// fputcsv($f, $fields);
+			// }
+			// fclose($f);
+			// $mail->addAttachment($filename);
+		// }
+
+		$total = $newProductsCnt; //+ count($this->products_excluded);
+
+		$mail->protocol = $this->config->get('config_mail_protocol');
+		$mail->parameter = $this->config->get('config_mail_parameter');
+		$mail->hostname = $this->config->get('config_smtp_host');
+		$mail->username = $this->config->get('config_smtp_username');
+		$mail->password = $this->config->get('config_smtp_password');
+		$mail->port = $this->config->get('config_smtp_port');
+		$mail->timeout = $this->config->get('config_smtp_timeout');
+		$mail->setTo($email);
+		$mail->setFrom($this->config->get('config_email'));
+		$mail->setSender($this->language->get('email_sender'));
+		$mail->setSubject(html_entity_decode($this->language->get('email_subject'), ENT_QUOTES, 'UTF-8'));
+		$mail->setHtml(html_entity_decode(sprintf($this->language->get('email_text'), $total, $newProductsCnt, $newProductsCnt, $newProductsCnt), ENT_QUOTES, 'UTF-8'));
+		$mail->send();
+
+		$this->log->write('Import result sending to: '.$email);
 	}
 	
 	/*
