@@ -1,7 +1,7 @@
 <?php
 ################################################################################################
 #  CSV Import Module for Opencart 1.5.1.x, 1.6.1.x  From http://bogatyrev.me		  		   #
-#  Version: 0.58																	  		   #
+#  Version: 0.9b																	  		   #
 ################################################################################################
 class ControllerModuleCsvImport extends Controller {
 
